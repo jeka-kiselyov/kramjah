@@ -1,0 +1,44 @@
+'use strict'
+
+const t = require('tap');
+const { test } = t;
+
+const path = require('path');
+
+const MarketTrader = require('../classes/MarketTrader.js');
+const HistoricalMarket = require('../classes/HistoricalMarket.js');
+const HistoricalMarketPriceCombined = require('../classes/HistoricalMarketPriceCombined.js');
+
+test('setup', async t => {
+});
+
+test('Sample test', async t => {
+	t.ok(true);
+	t.equal(1, 1, 'Equals');
+});
+
+test('Check bids amount dispersion', async t=>{
+	let mt = new MarketTrader();
+	let doNotAddIfThereReSamePriceInPercentInterval = 0.1;
+
+	let startPrice = 50000;
+	let tillPrice = 100;
+
+	let price = startPrice;
+	let addedBids = 0;
+	let lastAddedPrice = 0;
+	do {
+		if (mt.operatingBalance > 950 || mt.operatingBalance < 100) {
+			console.log(price, mt.operatingBalance, mt.blockedBalance, addedBids, lastAddedPrice);
+		}
+		if (!mt.isThereBidWorkerInTargetPriceAt(price, doNotAddIfThereReSamePriceInPercentInterval*0.5)) {
+			mt.addBidWorkerWaitingForBuyAt(price);
+			lastAddedPrice = price;
+			addedBids++;
+		}
+		price = price*0.999;
+	} while(price > tillPrice && mt.operatingBalance > 10);
+});
+
+test('teardown', async t=>{
+});
