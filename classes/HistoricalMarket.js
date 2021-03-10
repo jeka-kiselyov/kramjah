@@ -51,6 +51,9 @@ class HistoricalMarket extends IndexedCSV {
 		this.RAWINTERVALS = RAWINTERVALS;
 
 		this._doNotCheckIntergrity = false;
+
+
+		this._preparedLastIndex = null;
 	}
 
 	/**
@@ -119,8 +122,12 @@ class HistoricalMarket extends IndexedCSV {
 		const lastIndex = await this.getLastIndex();
 		debug('Last time index is %d', lastIndex);
 
+		this._preparedLastIndex = lastIndex;
+
 		/// move first index to longest interval to future and start calculation
 		const firstPeriodIndex = firstIndex + RAWINTERVALS[RAWINTERVALS.length - 1];
+
+		// const firstPeriodIndex = 1609452000000;
 
 		const firstPrice = await this.getPriceAt(firstPeriodIndex);
 		debug('First price is %p', firstPrice);
@@ -159,9 +166,13 @@ class HistoricalMarket extends IndexedCSV {
 
 	async saveToFile(filename) {
 		const fp =  await fsp.open(filename, 'w');
+		let curTime = (new Date()).getTime();
+
 		for (let time in this._combinedCache[INTERVALS.WEEK1]) {
-			if (this._combinedCache[INTERVALS.WEEK1][time].isFull()) {
+			if (this._combinedCache[INTERVALS.WEEK1][time].isFull() && this._combinedCache[INTERVALS.WEEK1][time].time + INTERVALS.WEEK1 < this._preparedLastIndex) {
 				const uint8Array = this._combinedCache[INTERVALS.WEEK1][time].toUint8Array();
+
+				debug('Writing interval to file%p %d', this._combinedCache[INTERVALS.WEEK1][time], this._combinedCache[INTERVALS.WEEK1][time].time);
 				// console.error('write chunk', uint8Array[0], uint8Array[1], uint8Array[2], uint8Array[3] );
 				await fp.write(uint8Array, 0, uint8Array.length); // Uint8Array
 			}

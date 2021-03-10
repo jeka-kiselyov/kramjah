@@ -14,6 +14,13 @@ class Handler extends Command {
 
         console.log(tb);
 
+        let success = await tradingApi.transferFromTradingBalance({
+            currency: 'USD',
+            amount: '1.00',
+        });
+
+        console.log(success);
+
         let ao = await tradingApi.getActiveOrders({
             symbol: 'BTCUSD',
         });

@@ -11,12 +11,14 @@ class Handler extends Command {
     setup(progCommand) {
         progCommand.description('Look at market live');
         progCommand.argument('[filename]', '.dat file path');
+        progCommand.argument('[symbol]', 'trading symbol pair name, like btcusd');
         progCommand.argument('[ui]', 'Disply UI progress 0/1, default 1', 1);
     }
 
     async handle(args, options, logger) {
         const currentPath = process.cwd();
         const filename = path.join(currentPath, args.filename);
+        const symbol = args.symbol;
 
         // const marketTrader = new MarketTrader();
 
@@ -24,7 +26,7 @@ class Handler extends Command {
 
         let timeStart = +new Date();
 
-        const historicalMarket = new HistoricalMarket({filename: path.join(__dirname, '../../data/btcusd.csv'), hasHeader: true});
+        const historicalMarket = new HistoricalMarket();
         await historicalMarket.readFromFile(filename);
         historicalMarket.disableCSV();
 
@@ -40,7 +42,7 @@ class Handler extends Command {
 
         while (fromTime < toTime) {
             let getTo = fromTime + 24 * 60 * 60 * 1000;
-            let data = await realMarketData.getM5Candles('BTCUSD', fromTime, getTo);
+            let data = await realMarketData.getM5Candles(symbol, fromTime, getTo);
 
             let addedPricePoints = 0;
             for (let item of data) {
@@ -77,7 +79,7 @@ class Handler extends Command {
         let time = (new Date()).getTime();
         let i = 0;
         do {
-            const ticker = await realMarketData.getTicker('BTCUSD');
+            const ticker = await realMarketData.getTicker(symbol);
             // console.log(ticker);
 
             await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(ticker);

@@ -24,6 +24,16 @@ class Base {
 		}
 	}
 
+	/**
+	 * Method to overload: On initialization we determine how much money is available for this strategy to trade with
+	 * totalQuoteCurrencyBalance is the total amount available in quote currency (USD when trading on BTCUSD) on your trading account
+	 * return all totalQuoteCurrencyBalance or part of it
+	 * @param  {Number} totalQuoteCurrencyBalance [description]
+	 * @return {Number}                           [description]
+	 */
+	async getMaxOperatingBalance(totalQuoteCurrencyBalance) {
+		return totalQuoteCurrencyBalance;
+	}
 
 	/**
 	 * Method to overload: When we bought something, we are posting bid to sell it for (boughtPrice * (100+getExpectedGrowthPercent)/100);

@@ -5,7 +5,7 @@ class RealMarketData {
 	constructor(params = {}) {
 		this._api = axios.create({
 			baseURL: 'https://api.hitbtc.com/api/2/public/',
-			timeout: 3000,
+			timeout: 6000,
 			headers: {'X-Custom-Header': 'foobar'}
 		});
 	}

@@ -116,9 +116,10 @@ class Handler extends Command {
                     }
                 }
 
-                if (args.ui) await ConsoleUI.setBaseCurrency(marketTrader.baseCurrency);
-                if (args.ui) await ConsoleUI.setQuoteCurrency(marketTrader.quoteCurrency);
-                if (args.ui) await ConsoleUI.setLastPrice(price.price);
+                if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
+                // if (args.ui) await ConsoleUI.setBaseCurrency(marketTrader.baseCurrency);
+                // if (args.ui) await ConsoleUI.setQuoteCurrency(marketTrader.quoteCurrency);
+                // if (args.ui) await ConsoleUI.setLastPrice(price.price);
                 try {
                     if (args.ui) await ConsoleUI.drawTimePrice(price);
                     if (args.ui) await ConsoleUI.drawMarketTrader(marketTrader);

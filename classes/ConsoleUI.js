@@ -10,17 +10,38 @@ class ConsoleUI {
 	constructor(params = {}) {
 	}
 
-	static setLastPrice(price) {
-		this._lastPrice = price;
+	static setDataFromMarketTrader(marketTrader) {
+		this._quantityIncrement = marketTrader._quantityIncrement;
+		this._tickSize = marketTrader._tickSize;
+		this._baseCurrency = marketTrader._baseCurrency;
+		this._quoteCurrency = marketTrader._quoteCurrency;
+
+		if (marketTrader._lastRunPriceCombined) {
+			this._lastPrice = marketTrader._lastRunPriceCombined.price;
+		} else {
+			this._lastPrice = '';
+		}
 	}
 
-	static setBaseCurrency(currency) {
-		this._baseCurrency = currency;
-	}
+	// static setQuantityIncrement(quantityIncrement) {
+	// 	this._quantityIncrement = quantityIncrement;
+	// }
 
-	static setQuoteCurrency(currency) {
-		this._quoteCurrency = currency;
-	}
+	// static setTickSize(tickSize) {
+	// 	this._tickSize = tickSize;
+	// }
+
+	// static setLastPrice(price) {
+	// 	this._lastPrice = price;
+	// }
+
+	// static setBaseCurrency(currency) {
+	// 	this._baseCurrency = currency;
+	// }
+
+	// static setQuoteCurrency(currency) {
+	// 	this._quoteCurrency = currency;
+	// }
 
 	static initialize() {
 		this._lastPrice = 0;
@@ -161,11 +182,11 @@ class ConsoleUI {
 	}
 
 	static currencyFormat(value) {
-		return (value.toFixed(2));
+		return (value.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize)))));
 	}
 
 	static itemValueFormat(value) {
-		return (value.toFixed(6));
+		return (value.toFixed(Math.ceil(Math.abs(Math.log10(this._quantityIncrement)))));
 	}
 
 	static async drawMarketTrader(marketTrader) {
@@ -338,6 +359,10 @@ class ConsoleUI {
 			const shifts = await price.getShifts(48);
 			let shiftsStringMIN5 = this.shiftsToString(shifts);
 
+			const intervalMIN15 = await price.getInterval(HistoricalMarket.INTERVALS.MIN15);
+			const shiftsMIN15 = await intervalMIN15.getShifts(8);
+			let shiftsStringMIN15 = this.shiftsToString(shiftsMIN15);
+
 			const intervalHOUR1 = await price.getInterval(HistoricalMarket.INTERVALS.HOUR1);
 			const shiftsHOUR1 = await intervalHOUR1.getShifts(24);
 			let shiftsStringHOUR1 = this.shiftsToString(shiftsHOUR1);
@@ -351,7 +376,7 @@ class ConsoleUI {
 			let shiftsStringWEEK1 = this.shiftsToString(shiftsWEEK1);
 
 			content += "\n";
-			content += 'W1:'+shiftsStringWEEK1+' D1:'+shiftsStringDAY1+' H1:'+shiftsStringHOUR1+' M5:'+shiftsStringMIN5;
+			content += 'W1:'+shiftsStringWEEK1+' D1:'+shiftsStringDAY1+' H1:'+shiftsStringHOUR1+' M15:'+shiftsStringMIN15+' M5:'+shiftsStringMIN5;
 			// content += 'W1'+shiftsStringWEEK1+'D1'+shiftsStringDAY1+'H1'+shiftsStringHOUR1+'M5'+shiftsStringMIN5;
 		}
 

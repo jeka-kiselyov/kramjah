@@ -206,11 +206,21 @@ class MarketTraderBidWorker extends EventEmitter {
 		}
 	}
 
-	takeOutProfit(value) {
+	async takeOutProfit(value) {
 		if ((this._balances[0] - value) < 0) {
 			throw new Error('Trying to took too much');
 		}
 		this._balances[0]-=value;
+
+		if (this.mode == 'market') {
+			let amountToApi = value.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
+
+			// @todo: check if successful
+			await this._tradingApi.transferFromTradingBalance({
+				amount: amountToApi,
+				currency: this._marketTrader._quoteCurrency,
+			});
+		}
 
 		return true;
 	}

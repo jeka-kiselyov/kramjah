@@ -32,7 +32,9 @@ class Handler extends Command {
             await marketTrader.prepareSymbolInfo(); // load symbol information from market (this api is public, no api keys needed)
             logger.info('Got symbol infromation from the market: '+args.symbol);
         } catch(e) {
-            logger.error('Can not get symbol information from the market');
+            console.log(e);
+
+            logger.error('Can not get symbol information from the market: '+args.symbol);
             this.program.exit(null);
         }
 
@@ -99,9 +101,9 @@ class Handler extends Command {
                 }
             }
 
-            if (args.ui) await ConsoleUI.setLastPrice(price.price);
-            if (args.ui) await ConsoleUI.setBaseCurrency(marketTrader.baseCurrency);
-            if (args.ui) await ConsoleUI.setQuoteCurrency(marketTrader.quoteCurrency);
+            if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
+            // if (args.ui) await ConsoleUI.setBaseCurrency(marketTrader.baseCurrency);
+            // if (args.ui) await ConsoleUI.setQuoteCurrency(marketTrader.quoteCurrency);
 
             try {
                 if (args.ui) await ConsoleUI.drawTimePrice(price);
@@ -116,6 +118,7 @@ class Handler extends Command {
         } while(time <= endTime);
 
 
+        ConsoleUI.setDataFromMarketTrader(marketTrader);
         logger.info('Profit: '+ConsoleUI.currencyFormat(marketTrader.profitBalance));
         logger.info('Estimated Balance: '+ConsoleUI.currencyFormat(marketTrader.getEstimatedPortfolioPrice()));
         logger.info('If Would HODL: '+ConsoleUI.currencyFormat(marketTrader.getIfWouldHODLPortfolioPrice()));

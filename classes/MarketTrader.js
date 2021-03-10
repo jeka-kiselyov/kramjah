@@ -94,7 +94,7 @@ class MarketTrader {
 		if (!this._tickSize || this._tickSize >= 1) {
 			throw new Error('I am not sure tickSize is ok, please check: '+this._tickSize);
 		}
-		if (!this._quantityIncrement || this._quantityIncrement >= 1) {
+		if (!this._quantityIncrement || this._quantityIncrement > 1) {
 			throw new Error('I am not sure quantityIncrement is ok, please check: '+this._quantityIncrement);
 		}
 
@@ -167,7 +167,12 @@ class MarketTrader {
 		await this.prepareSymbolInfo();
 
 		const workOnBalance = await this._strategy.getMaxBid(price);
-		if (workOnBalance < 1 || workOnBalance > this._operatingBalance) {
+		const minBid = this._tickSize * 10;
+
+		// console.error('minBid', minBid);
+		// console.error('workOnBalance', workOnBalance);
+
+		if (workOnBalance < minBid || workOnBalance > this._operatingBalance) {
 			return false;
 		}
 
@@ -207,12 +212,13 @@ class MarketTrader {
 			});
 			this._closedBids.unshift(closedBid);
 
-			bidWorker.takeOutProfit(profit);
 			this._profitBalance += profit;
 
 			this._itemBalance -= amount;
 
-			this._blockedBalance += bidWorker.gonnaPay;;
+			this._blockedBalance += bidWorker.gonnaPay;
+
+			bidWorker.takeOutProfit(profit);
 		});
 
 		this._bidWorkers.push(bidWorker);
@@ -250,9 +256,9 @@ class MarketTrader {
 			let orderToPriceGroup = (order)=>{
 
 				order.createdAt = new Date(order.createdAt);
-				order.createdAt.setTime(order.createdAt.getTime() + Math.random()*1000)
+				// order.createdAt.setTime(order.createdAt.getTime() + Math.random()*1000)
 				let clientOrderId = order.clientOrderId;
-				if (clientOrderId.indexOf('_') != -1) { // made by us
+				if (clientOrderId.indexOf('_') != -1 && order.symbol == this._symbol) { // made by us
 					let clientOrderIdItems = clientOrderId.split('_');
 
 					let originalPrice = parseFloat(clientOrderIdItems[0], 10);
@@ -318,7 +324,7 @@ class MarketTrader {
 	        let tb = await this._tradingApi.getTradingBalance();
 	        for (let tbItem of tb) {
 	        	if (tbItem.currency == this._quoteCurrency) {
-	        		this._operatingBalance = parseFloat(tbItem.available, 10);
+	        		this._operatingBalance = await this._strategy.getMaxOperatingBalance(parseFloat(tbItem.available, 10));
 	        		this._blockedBalance = parseFloat(tbItem.reserved);
 	        	}
 	        	if (tbItem.currency == this._baseCurrency) {
@@ -330,6 +336,7 @@ class MarketTrader {
 	        }
 
 		} catch(e) {
+			console.error(e);
 			throw new Error('Can not restore data from your trading account. Please check api keys');
 		}
 	}

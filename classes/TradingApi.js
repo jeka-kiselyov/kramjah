@@ -10,7 +10,7 @@ class TradingApi {
 		const credentials = Buffer.from(apiKey + ':' + secretKey).toString('base64');
 		this._api = axios.create({
 			baseURL: 'https://api.hitbtc.com/api/2/',
-			timeout: 3000,
+			timeout: 6000,
 			headers: {
 				'Authorization': ('Basic ' + credentials)
 			}
@@ -23,6 +23,35 @@ class TradingApi {
 		};
 		// time to cache recent active orders response
 		this._recentActiveOrdersCachedFor = 5000;
+	}
+
+	async transferFromTradingBalance(params) {
+		let url = 'account/transfer';
+
+		let currency = params.currency;
+		let amount = params.amount;
+
+		let data = {
+			type: 'exchangeToBank',
+			currency: currency,
+			amount: amount,
+		};
+
+		// console.log(data);
+
+		try {
+			let resp = await this._api.post(url, data);
+
+			// console.log(resp.data);
+
+			if (resp && resp.data && resp.data.id) {
+				return true;
+			}
+		} catch(e) {
+			// console.log(e);
+		}
+
+		return false;
 	}
 
 	async getTradingBalance() {
