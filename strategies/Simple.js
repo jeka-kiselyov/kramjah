@@ -13,7 +13,16 @@ class Strategy extends Base {
 	 * @return {Number}                           [description]
 	 */
 	async getMaxOperatingBalance(totalQuoteCurrencyBalance) {
-		return totalQuoteCurrencyBalance;
+		const marketTrader = this.getMarketTrader();
+
+		if (marketTrader._baseCurrency == 'ETH' || marketTrader._baseCurrency == 'BTC' || marketTrader._baseCurrency == 'LTC') {
+			return 900;
+		}
+		if (marketTrader._quoteCurrency == 'USD') {
+			return 600;
+		} else if (marketTrader._quoteCurrency == 'BTC') {
+			return 0.005;
+		}
 	}
 
 	/**
@@ -22,7 +31,9 @@ class Strategy extends Base {
 	 * @return {Number}                    Expected growth percent
 	 */
 	async getExpectedGrowthPercent(boughtAtPriceValue) {
-		return 2.4;
+		const marketTrader = this.getMarketTrader();
+
+		return 5;
 	}
 
 	/**
@@ -52,25 +63,43 @@ class Strategy extends Base {
 		const priceCombined = this.getLastRunPriceCombined();
 		const marketTrader = this.getMarketTrader();
 		const bidWorkers = this.getBidWorkers();
-		let operatingBalance = this.getOperatingBalance();
+
+		let availableCurrency = await this.asyncGetAvailableCurrency();
+
+		let maxBid = await this.getMaxBid(priceCombined.low);
+		let possibleBuyBidsCount = Math.floor(availableCurrency / maxBid);
+		let openBuyBidsCount = this.getOpenBuyBidsCount();
 
 		for (let bidWorker of bidWorkers) {
 			if (bidWorker.isWaitingForBuyLowerThan(priceCombined.low * 0.7)) {
 				/// close bids if they are waiting to buy with too low price
 				await marketTrader.archiveWaitingForBuyBidWorker(bidWorker);
 			}
-			if (operatingBalance < 10) {
-				if (bidWorker.isWaitingForBuyLowerThan(priceCombined.low * 0.95)) {
-					/// close bids if they are waiting to buy with too low price
-					await marketTrader.archiveWaitingForBuyBidWorker(bidWorker);
-				}
-			}
 		}
+
+		// let archivedCount = 0;
+		// let keptCount = 0;
+		// if (possibleBuyBidsCount <= 5 && openBuyBidsCount <= 10) {
+		// 	for (let i = bidWorkers.length; i--;) {
+		// 		let bidWorker = bidWorkers[i];
+
+		// 		if (bidWorker.isWaitingForBuy()) {
+		// 			if (keptCount <= 5) {
+		// 				keptCount++;
+		// 			} else {
+		// 				let archived = await marketTrader.archiveWaitingForBuyBidWorker(bidWorker);
+		// 				if (archived) {
+		// 					archivedCount++;
+		// 				}
+		// 			}
+		// 		}
+		// 	}
+		// }
 
 		const intervalPast = await priceCombined.getInterval(this.INTERVALS.MIN15);
 		const shiftsPast = await intervalPast.getShifts(3);
 
-		if (shiftsPast[shiftsPast.length - 1] > -0.5 || shiftsPast[shiftsPast.length - 2] > -0.5) {
+		if (shiftsPast[0] > -0.5 || shiftsPast[1] > -0.5) {
 			// do not add any buy bids if price is rising in last 2 hours
 			//
 			return;
@@ -80,10 +109,28 @@ class Strategy extends Base {
 		let minPriceDownPercent = 0.99;
 		let priceDownPercentStep = 0.0001;
 		let doNotAddIfThereReSamePriceInPercentInterval = 0.09;
+
+
+		if (marketTrader._quoteCurrency == 'BTC') {
+			doNotAddIfThereReSamePriceInPercentInterval = 0.2;
+		}
 		// let doNotAddIfThereReSamePriceInPercentInterval = 1.2;
 		//
 
-		let maxBid = await this.getMaxBid(priceCombined.low);
+		// if (marketTrader._quoteCurrency == 'BTC') {
+		// 	doNotAddIfThereReSamePriceInPercentInterval = 0.1;
+		// }
+
+		if (possibleBuyBidsCount <= 5) {
+			minPriceDownPercent = 0.95;
+		}
+		if (possibleBuyBidsCount < 10) {
+			doNotAddIfThereReSamePriceInPercentInterval *= 2;
+		}
+		if (possibleBuyBidsCount < 5) {
+			doNotAddIfThereReSamePriceInPercentInterval *= 2;
+		}
+
 
 		let maxPriceDownsCount = 200;
 		const priceTargets = [];
@@ -95,7 +142,27 @@ class Strategy extends Base {
 			}
 		}
 
+
 		for (let priceTarget of priceTargets) {
+			availableCurrency = await this.asyncGetAvailableCurrency();
+			possibleBuyBidsCount = Math.floor(availableCurrency / maxBid);
+
+			if (possibleBuyBidsCount < 20) {
+				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+			}
+			if (possibleBuyBidsCount < 15) {
+				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+			}
+			if (possibleBuyBidsCount < 10) {
+				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+			}
+			if (possibleBuyBidsCount < 5) {
+				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+			}
+			if (possibleBuyBidsCount < 2) {
+				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+			}
+
 			if (!marketTrader.isThereBidWorkerInTargetPriceAt(priceTarget, doNotAddIfThereReSamePriceInPercentInterval)) {
 				await marketTrader.addBidWorkerWaitingForBuyAt(priceTarget);
 			}

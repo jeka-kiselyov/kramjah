@@ -9,11 +9,13 @@ const BaseStrategy = require('../strategies/Base.js');
 
 class MarketTrader {
 	constructor(params = {}) {
+		this._logger = params.logger || null;
+
 		this._bidWorkers = [];
 		this._closedBids = [];
 
-		this._originalOperatingBalance = 1000;
-		this._operatingBalance = 1000;
+		this._originalOperatingBalance = params.operatingBalance || 1000;
+		this._operatingBalance = this._originalOperatingBalance;
 		this._profitBalance = 0;
 		this._blockedBalance = 0;
 
@@ -22,6 +24,7 @@ class MarketTrader {
 
 		this._firstRunPriceCombined = null;
 		this._lastRunPriceCombined = null;
+
 
 		this._strategyName = params.strategyName;
 		if (this._strategyName.length > 10) {
@@ -54,6 +57,16 @@ class MarketTrader {
 		this._symbolInfoPrepared = false;
 	}
 
+	log(...fArgs) {
+		if (this._logger) {
+			this._logger.info.apply(this._logger, fArgs);
+		}
+	}
+
+	get lastRunPriceCombined() {
+		return this._lastRunPriceCombined;
+	}
+
 	/**
 	 * String we add to order id on market to know bid is related to this markettrader
 	 * @return {String} [description]
@@ -75,6 +88,8 @@ class MarketTrader {
 			return true;
 		}
 
+		this.log('Getting symbol info: '+this._symbol);
+
 		const realMarket = new RealMarketData();
 		const symbolInfo = await realMarket.getSymbolInfo(this._symbol);
 
@@ -83,10 +98,14 @@ class MarketTrader {
 		}
 
 		this._tickSize = parseFloat(symbolInfo.tickSize, 10);
+		this.log('Tick size: '+this._tickSize);
 		this._quantityIncrement = parseFloat(symbolInfo.quantityIncrement, 10);
+		this.log('Quantity increment: '+this._quantityIncrement);
 
 		this._baseCurrency = symbolInfo.baseCurrency;
+		this.log('Base currency: '+this._baseCurrency);
 		this._quoteCurrency = symbolInfo.quoteCurrency;
+		this.log('Quote currency: '+this._quoteCurrency);
 
 		if (!this._tickSize || this._tickSize < 0) this._tickSize = 0;
 		if (!this._quantityIncrement || this._quantityIncrement < 0) this._quantityIncrement = 0;
@@ -133,6 +152,42 @@ class MarketTrader {
 		return this._itemBalanceBasedOnLastPrice;
 	}
 
+	async getAvailableCurrency() {
+		return (await this._strategy.getMaxOperatingBalance() - this.getUsedCurrency());
+	}
+
+	getUsedCurrency() {
+		let ret = 0;
+		ret += this._blockedBalance;
+
+		for (let bidWorker of this._bidWorkers) {
+			if (bidWorker.isWaitingForSell() && !bidWorker.isArchived()) {
+				ret += bidWorker.operatingBalance;
+			}
+		}
+
+		return ret;
+	}
+
+	async getPossibleBuyBidsCount() {
+		const lastPrice = this._lastRunPriceCombined.price;
+		const workOnBalance = await this._strategy.getMaxBid(lastPrice);
+		const availableCurrency = await this.getAvailableCurrency();
+
+		return Math.floor(availableCurrency / workOnBalance);
+	}
+
+	getOpenBuyBidsCount() {
+		let i = 0;
+		for (let bidWorker of this._bidWorkers) {
+			if (bidWorker.isWaitingForBuy() && !bidWorker.isArchived()) {
+				i++;
+			}
+		}
+
+		return i;
+	}
+
 	isThereBidWorkerWaitingForBuyAt(price, plusMinusPercents) {
 		for (let bidWorker of this._bidWorkers) {
 			if (bidWorker.isWaitingForBuyAt(price, plusMinusPercents)) {
@@ -166,13 +221,15 @@ class MarketTrader {
 	async addBidWorkerWaitingForBuyAt(price) {
 		await this.prepareSymbolInfo();
 
+		const availableCurrency = await this.getAvailableCurrency();
+
 		const workOnBalance = await this._strategy.getMaxBid(price);
 		const minBid = this._tickSize * 10;
 
 		// console.error('minBid', minBid);
 		// console.error('workOnBalance', workOnBalance);
 
-		if (workOnBalance < minBid || workOnBalance > this._operatingBalance) {
+		if (workOnBalance < minBid || workOnBalance > this._operatingBalance || workOnBalance > availableCurrency) {
 			return false;
 		}
 
@@ -202,6 +259,8 @@ class MarketTrader {
 
 			this._itemBalance += amount;
 			this._blockedBalance -= bidWorker.gonnaPay;
+
+			this.log('Bought '+amount+' for '+bidWorker.gonnaPay+' price: '+priceValue);
 		});
 
 		bidWorker.on('sold', (priceValue, amount, profit)=>{
@@ -226,11 +285,16 @@ class MarketTrader {
 		return bidWorker;
 	}
 
-	archiveWaitingForBuyBidWorker(bidWorker) {
-		if (bidWorker.archiveWaitingForBuy()) {
+	async archiveWaitingForBuyBidWorker(bidWorker) {
+		let archived = await bidWorker.archiveWaitingForBuy();
+		if (archived) {
 			this._operatingBalance += bidWorker.gonnaPay;
-			this._blockedBalance -= bidWorker.gonnaPay;;
+			this._blockedBalance -= bidWorker.gonnaPay;
+
+			return true;
 		}
+
+		return false;
 	}
 
 	/**
@@ -289,13 +353,13 @@ class MarketTrader {
 
 			    orders.sort(function(a, b) { return b.createdAt - a.createdAt; }); /// sort DESC by createdAt
 
-			    console.log(orders);
+			    this.log('There re '+orders.length+' orders on market in price of '+originalPriceValue);
 
 			    let mostRecentOrder = orders[0];
 
 			    if (mostRecentOrder.status == 'filled' && mostRecentOrder.side == 'buy') {
 			    	// most recent was bought while we were offline
-			    	console.log(originalPriceKey, 'filled buy');
+			    	this.log('There is filled buy order on price of '+originalPriceKey+' adding to be sold order over it');
 
 			    	this._mode = 'simulation';
 			    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
@@ -304,7 +368,7 @@ class MarketTrader {
 			    	await bidWorker.wasBought();
 			    } else if (mostRecentOrder.status == 'partiallyFilled' || mostRecentOrder.status == 'new') {
 			    	// order is active actually
-			    	console.log(originalPriceKey, 'active');
+			    	this.log('There is pending order on price of '+originalPriceKey+' side: '+mostRecentOrder.side);
 
 			    	this._mode = 'simulation';
 			    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
@@ -317,6 +381,8 @@ class MarketTrader {
 			    	bidWorker._lastOrderClientOrderId = mostRecentOrder.clientOrderId;
 
 			    	this._mode = 'market';
+			    } else {
+			    	this.log('They are cancelled, or sold long time ago, we are ignoring them');
 			    }
 			}
 
@@ -325,7 +391,7 @@ class MarketTrader {
 	        for (let tbItem of tb) {
 	        	if (tbItem.currency == this._quoteCurrency) {
 	        		this._operatingBalance = await this._strategy.getMaxOperatingBalance(parseFloat(tbItem.available, 10));
-	        		this._blockedBalance = parseFloat(tbItem.reserved);
+	        		// this._blockedBalance = 0;//parseFloat(tbItem.reserved);
 	        	}
 	        	if (tbItem.currency == this._baseCurrency) {
 	        		this._itemBalance = parseFloat(tbItem.available, 10) + parseFloat(tbItem.reserved);

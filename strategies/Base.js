@@ -62,10 +62,18 @@ class Base {
 		const marketTrader = this.getMarketTrader();          // MarketTrader instance
 		const bidWorkers = this.getBidWorkers();              // Active and archived bidworkers
 		const operatingBalance = this.getOperatingBalance();  // Amount of quote currency available (USD when you trade for BTCUSD).
-
+		const availableCurrency = await this.asyncGetAvailableCurrency();
 		//
 		// Do anything with them
 		//
+	}
+
+	async asyncGetAvailableCurrency() {
+		return this._marketTrader.getAvailableCurrency();
+	}
+
+	getOpenBuyBidsCount() {
+		return this._marketTrader.getOpenBuyBidsCount();
 	}
 
 	getLastRunPriceCombined() {

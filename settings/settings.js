@@ -12,5 +12,17 @@ module.exports = {
 	"paths": {
 		"commands": path.join(__dirname, "../commands"),
 		"models": path.join(__dirname, "../models"),
-	}
+	},
+	"traders": [
+		{
+			"dat": "data/btcusd2021.dat",
+			"strategyName": "Simple",
+			"symbol": "btcusd",
+		},
+		{
+			"dat": "data/ethusd2021.dat",
+			"strategyName": "Simple",
+			"symbol": "ethusd",
+		}
+	]
 };

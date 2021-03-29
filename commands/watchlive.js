@@ -22,6 +22,13 @@ class Handler extends Command {
 
         // const marketTrader = new MarketTrader();
 
+
+        let realMarketData = new RealMarketData();
+
+        logger.info('Getting symbol info: '+symbol);
+
+        const symbolInfo = await realMarketData.getSymbolInfo(symbol);
+
         logger.info('Checking integrity of .dat file: '+filename);
 
         let timeStart = +new Date();
@@ -33,7 +40,6 @@ class Handler extends Command {
         let timeEnd = +new Date();
         logger.info('Loaded in '+(timeEnd - timeStart)+' ms');
 
-        let realMarketData = new RealMarketData();
 
         let toTime = (new Date()).getTime();
         let fromTime = historicalMarket.getEndTime();
@@ -74,6 +80,7 @@ class Handler extends Command {
         }
 
         if (args.ui) await ConsoleUI.initialize();
+        if (args.ui) await ConsoleUI.setDataFromSymbolInfo(symbolInfo);
 
         let price = null;
         let time = (new Date()).getTime();

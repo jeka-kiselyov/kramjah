@@ -1,4 +1,5 @@
 const EventEmitter = require('events');
+const Notificator = require('./Notificator.js');
 
 class MarketTraderBidWorker extends EventEmitter {
 	constructor(params = {}) {
@@ -26,6 +27,12 @@ class MarketTraderBidWorker extends EventEmitter {
 		this._operatingBalance = 0;
 
 		this._lastOrderClientOrderId = null;
+	}
+
+	log(...fArgs) {
+		if (this._marketTrader && this._marketTrader._logger) {
+			this._marketTrader._logger.info.apply(this._marketTrader._logger, fArgs);
+		}
 	}
 
 	isArchived() {
@@ -216,10 +223,14 @@ class MarketTraderBidWorker extends EventEmitter {
 			let amountToApi = value.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
 
 			// @todo: check if successful
-			await this._tradingApi.transferFromTradingBalance({
+			let success = await this._tradingApi.transferFromTradingBalance({
 				amount: amountToApi,
 				currency: this._marketTrader._quoteCurrency,
 			});
+
+			if (success) {
+				await Notificator.log('💰 +'+amountToApi+this._marketTrader._quoteCurrency);
+			}
 		}
 
 		return true;

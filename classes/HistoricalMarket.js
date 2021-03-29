@@ -6,6 +6,8 @@ const Pack = require('./Pack.js');
 
 const debug = require('./Debug.js')('HistoricalMarket');
 
+const RealMarketData = require('../classes/RealMarketData.js');
+
 const RAWINTERVALS = [
 	5 * 60 * 1000,
 	15 * 60 * 1000,
@@ -112,7 +114,7 @@ class HistoricalMarket extends IndexedCSV {
 		return this._pricesCache[this._pricesCacheKeys[minDiffI]];
 	}
 
-	async prepareToBeSaved(maxWeeks = null) {
+	async prepareToBeSaved(maxWeeks = null, fromTime = null) {
 		/// 1st - read very first price from the csv file
 		debug('Loading data to be saved to cache file');
 
@@ -125,7 +127,11 @@ class HistoricalMarket extends IndexedCSV {
 		this._preparedLastIndex = lastIndex;
 
 		/// move first index to longest interval to future and start calculation
-		const firstPeriodIndex = firstIndex + RAWINTERVALS[RAWINTERVALS.length - 1];
+		let firstPeriodIndex = firstIndex + RAWINTERVALS[RAWINTERVALS.length - 1];
+
+		if (fromTime && fromTime > firstPeriodIndex) {
+			firstPeriodIndex = fromTime;
+		}
 
 		// const firstPeriodIndex = 1609452000000;
 
@@ -169,7 +175,7 @@ class HistoricalMarket extends IndexedCSV {
 		let curTime = (new Date()).getTime();
 
 		for (let time in this._combinedCache[INTERVALS.WEEK1]) {
-			if (this._combinedCache[INTERVALS.WEEK1][time].isFull() && this._combinedCache[INTERVALS.WEEK1][time].time + INTERVALS.WEEK1 < this._preparedLastIndex) {
+			if (this._combinedCache[INTERVALS.WEEK1][time].isFull() && (!this._preparedLastIndex || this._combinedCache[INTERVALS.WEEK1][time].time + INTERVALS.WEEK1 < this._preparedLastIndex) ) {
 				const uint8Array = this._combinedCache[INTERVALS.WEEK1][time].toUint8Array();
 
 				debug('Writing interval to file%p %d', this._combinedCache[INTERVALS.WEEK1][time], this._combinedCache[INTERVALS.WEEK1][time].time);
@@ -213,6 +219,7 @@ class HistoricalMarket extends IndexedCSV {
 	}
 
 	async getPriceAt(time) {
+		debug('getPriceAt, %d', time);
 		if (this._pricesCache[time]) {
 			// debug('price from cache, %p', this._pricesCache[time]);
 			// console.log('price cached', new Date(time), time);
@@ -361,6 +368,19 @@ class HistoricalMarket extends IndexedCSV {
 		}
 	}
 
+	isThereCombinedPrice(time, interval) {
+		// debug('getCombinedPrice %d %d', time, interval);
+		const fromTime = Math.floor(time / interval) * interval;
+		const toTime = fromTime + interval;
+
+		if (this._combinedCache[interval] && this._combinedCache[interval][fromTime]) {
+			debug('combinedPrice from cache, %d %d %p', time, fromTime, this._combinedCache[interval][fromTime]);
+			return this._combinedCache[interval][fromTime];
+		}
+
+		return false;
+	}
+
 	async getCombinedPrice(time, interval) {
 		// debug('getCombinedPrice %d %d', time, interval);
 		const fromTime = Math.floor(time / interval) * interval;
@@ -392,6 +412,7 @@ class HistoricalMarket extends IndexedCSV {
 						throw e;
 					}
 				}
+
 				if (lowerCombined) {
 					prices.push(lowerCombined);
 				}
@@ -449,6 +470,104 @@ class HistoricalMarket extends IndexedCSV {
 			return null;
 		}
 
+	}
+
+	/**
+	 * On a good .dat file there should be max 1 not full top level interval (most recent one)
+	 * @return {Boolean} [description]
+	 */
+	isIntegrityOk() {
+        let topLevelIntervals = this.getTopLevelIntervals();
+        let thereIsNotFull = 0;
+        let fullIntervals = 0;
+        for (let topLevelInterval of topLevelIntervals) {
+            if (!topLevelInterval.isFull()) {
+                thereIsNotFull++;
+                debug((thereIsNotFull == 1 ? 'OK' : 'ERROR')+' Top level interval '+new Date(topLevelInterval.time)+' is not full');
+            } else {
+                fullIntervals++;
+            }
+        }
+
+        if (thereIsNotFull > 1) {
+            return false;
+        }
+
+        return true;
+	}
+
+	/**
+	 * Get prices from real market till now and keep them in this instance memory
+	 * @return {[type]} [description]
+	 */
+	async fulfilTillNow(symbol) {
+        let realMarketData = new RealMarketData();
+
+        let toTime = (new Date()).getTime();
+        let fromTime = this.getEndTime();
+
+        fromTime  -= 7*24*60*60*1000; // move for one top level interval to the past to be sure we cover gaps
+
+        while (fromTime < toTime) {
+            let getTo = fromTime + 24 * 60 * 60 * 1000;
+            let data = await realMarketData.getM5Candles(symbol, fromTime, getTo);
+
+            let addedPricePoints = 0;
+            for (let item of data) {
+                await this.pushLowestCombinedIntervalRAWAndRecalculateParents(item);
+                addedPricePoints++;
+            }
+            await new Promise((res)=>{ setTimeout(res, 100); }); // to be sure we are safe in limits
+            fromTime += 24 * 60 * 60 * 1000;
+        }
+
+        return true;
+	}
+
+	/**
+	 * Fill gaps in prices so there's price for every low level interval even if there were no trades on the market
+	 * @param  {[type]} timeOffset time offset in microseconds to the past. Default is 2 weeks
+	 * @return {[type]}            [description]
+	 */
+	async fillGaps(timeOffset) {
+		if (!timeOffset) {
+			timeOffset = 2 * 14*24*60*60*1000; // fill gaps in last two weeks by default. You'd better run refresh dat to update .dat file at least once in two weeks
+		}
+
+        let toTime = (new Date()).getTime();
+        let time = (new Date()).getTime();
+
+        let fromTime = this.getEndTime();
+        fromTime -= timeOffset; // move for one top level interval to the past to be sure we cover gaps
+
+        let getTo = time;
+        let lastProcessedPriceCombined = null;
+
+        const interval = RAWINTERVALS[0];
+        for (let timeToCheck = fromTime; timeToCheck < getTo && timeToCheck < toTime; timeToCheck += interval) {
+            let foundCombined = this.isThereCombinedPrice(timeToCheck, interval);
+            if (!foundCombined) {
+                // logger.info('Not added for '+timeToCheck);
+
+                const item = {
+                    time: timeToCheck,
+                    volume: lastProcessedPriceCombined.volume,
+                    high: lastProcessedPriceCombined.high,
+                    low: lastProcessedPriceCombined.low,
+                    open: lastProcessedPriceCombined.open,
+                    close: lastProcessedPriceCombined.close,
+                };
+                await this.pushLowestCombinedIntervalRAWAndRecalculateParents(item);
+            } else {
+                lastProcessedPriceCombined = foundCombined;
+            }
+
+            if (!this.isThereCombinedPrice(timeToCheck, interval)) {
+                logger.info('Bad!');
+            }
+        }
+
+        return true;
 	}
 };
 

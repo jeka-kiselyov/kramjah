@@ -10,7 +10,20 @@ class ConsoleUI {
 	constructor(params = {}) {
 	}
 
+	static clear() {
+		this._screen.realloc();
+	}
+
+	static setDataFromSymbolInfo(symbolInfo) {
+		this._quoteCurrency = symbolInfo.quoteCurrency;
+		this._baseCurrency = symbolInfo.baseCurrency;
+		this._quantityIncrement = symbolInfo.quantityIncrement;
+		this._tickSize = symbolInfo.tickSize;
+	}
+
 	static setDataFromMarketTrader(marketTrader) {
+		this._marketTrader = marketTrader;
+
 		this._quantityIncrement = marketTrader._quantityIncrement;
 		this._tickSize = marketTrader._tickSize;
 		this._baseCurrency = marketTrader._baseCurrency;
@@ -23,32 +36,82 @@ class ConsoleUI {
 		}
 	}
 
-	// static setQuantityIncrement(quantityIncrement) {
-	// 	this._quantityIncrement = quantityIncrement;
-	// }
+	static setLastPrice(value) {
+		this._lastPrice = value;
+	}
 
-	// static setTickSize(tickSize) {
-	// 	this._tickSize = tickSize;
-	// }
+	static async redrawTimePriceStats(option) {
+		this._statsOption = option;
+		await this.drawTimePrice();
+		this.swawBuffers();
+	}
 
-	// static setLastPrice(price) {
-	// 	this._lastPrice = price;
-	// }
+	static debug(...fArgs) {
+		let d = new Date();
 
-	// static setBaseCurrency(currency) {
-	// 	this._baseCurrency = currency;
-	// }
 
-	// static setQuoteCurrency(currency) {
-	// 	this._quoteCurrency = currency;
-	// }
+	    this._screen.debug.apply(this._screen, fArgs);
+		// this._screen.debug(''+d.toTimeString().split(' ')[0]+' | '+string);
+	}
+
+	static wasPausePressed() {
+		if (this._pausePressed) {
+			if ((new Date()).getTime() - this._pausePressedAt.getTime() < 30000) { // keep pause for 30 seconds
+				return true;
+			} else {
+				this._pausePressed = false;
+				this._pausePressedAt = null;
+			}
+		}
+
+		return false;
+	}
 
 	static initialize() {
+		this._quantityIncrement = 0.00001;
+		this._tickSize = 0.00001;
+
 		this._lastPrice = 0;
+		this._statsOption = '1';
 
 		this._screen = blessed.screen({
-			smartCSR: true
+			smartCSR: true,
+			debug: true,
 		});
+
+	    this._screen.key('l', ()=>{
+	    	this._screen.debugLog.toggle();
+	    });
+
+		this._screen.key('p', ()=>{
+			this._pausePressed = true;
+			this._pausePressedAt = new Date();
+		});
+
+		this._screen.key('up', ()=>{
+			this.drawNextMarketTrader();
+			this._pausePressed = true;
+			this._pausePressedAt = new Date();
+		});
+
+		this._screen.key('down', ()=>{
+			this.drawPrevMarketTrader();
+			this._pausePressed = true;
+			this._pausePressedAt = new Date();
+		});
+
+		this._screen.key('1', ()=>{ this.redrawTimePriceStats('1'); });
+		this._screen.key('2', ()=>{ this.redrawTimePriceStats('2'); });
+		this._screen.key('3', ()=>{ this.redrawTimePriceStats('3'); });
+
+		this._screen.key('4', ()=>{ this.redrawTimePriceStats('4'); });
+		this._screen.key('5', ()=>{ this.redrawTimePriceStats('5'); });
+		this._screen.key('6', ()=>{ this.redrawTimePriceStats('6'); });
+
+		this._screen.key('7', ()=>{ this.redrawTimePriceStats('7'); });
+		// this._screen.key('2', async()=>{ console.log(2); this._statsOption = '2'; await this.drawTimePrice(); this.swawBuffers(); });
+		// this._screen.key('3', async()=>{console.log(3);  this._statsOption = '3'; await this.drawTimePrice(); this.swawBuffers(); });
+		// this._screen.key('4', ()=>{ this._statsOption = '4'; this.drawTimePrice(); });
 
 		this._chartBox = blessed.box({
 			align: 'right',
@@ -164,7 +227,18 @@ class ConsoleUI {
 		// setLabel(text/options) - Set the label text for the top-left corner. Example options: {text:'foo',side:'left'}
 
 		// this._screen.render();
+
+		this._initialized = true;
 	}
+
+	static isInitialized() {
+		if (this._initialized) {
+			return true;
+		}
+
+		return false;
+	}
+
 
 	static swawBuffers() {
   //   READLINE.cursorTo(process.stdout, 0, 0);
@@ -190,13 +264,18 @@ class ConsoleUI {
 	}
 
 	static async drawMarketTrader(marketTrader) {
+		if (!marketTrader.lastRunPriceCombined) {
+			return false;
+		}
+
+		await this.setDataFromMarketTrader(marketTrader);
+		await this.drawTimePrice(marketTrader.lastRunPriceCombined);
+
 		const portfolioPrice = marketTrader.getEstimatedPortfolioPrice();
 		const ifWouldHODLPortfolioPrice = marketTrader.getIfWouldHODLPortfolioPrice();
 
-		// const statsTable = new Table({
-		// 	head: ['Profit', 'Operating Balance', 'Blocked Balance', 'Item Balance', 'Estimated Balance'],
-		// 	chars: {'mid': '', 'left-mid': '', 'mid-mid': '', 'right-mid': ''},
-		// 	});
+		const possibleBuyBids = await marketTrader.getPossibleBuyBidsCount();
+		const availCurrency = await marketTrader.getAvailableCurrency();
 
 		const statsRows = [];
 		statsRows.push(['Profit', this.currencyFormat(marketTrader.profitBalance)]);
@@ -205,25 +284,12 @@ class ConsoleUI {
 		statsRows.push(['Operating Balance', this.currencyFormat(marketTrader.operatingBalance)]);
 		statsRows.push(['Blocked Balance', this.currencyFormat(marketTrader.blockedBalance)]);
 		statsRows.push(['Item Balance', this.itemValueFormat(marketTrader.itemBalance)]);
-		// statsRows.push(['Profit', 'Operating Balance', 'Blocked Balance', 'Item Balance', 'Estimated Balance']);
-
-		// statsRows.push([
-		// 		this.currencyFormat(marketTrader.profitBalance),
-		// 		this.currencyFormat(marketTrader.operatingBalance),
-		// 		this.currencyFormat(marketTrader.blockedBalance),
-		// 		this.itemValueFormat(marketTrader.itemBalance),
-		// 		this.currencyFormat(portfolioPrice),
-		// 	]);
+		statsRows.push(['Open Buy Bids', ''+marketTrader.getOpenBuyBidsCount()]);
+		statsRows.push(['Possible Buy Bids', ''+possibleBuyBids]);
+		statsRows.push(['Used Currency', this.currencyFormat(marketTrader.getUsedCurrency())]);
+		statsRows.push(['Avail Currency', this.currencyFormat(availCurrency)]);
 
 		this._traderBox.setData(statsRows);
-
-		// this.out(statsTable.toString());
-		// this.out('bidWorkers: '+marketTrader._bidWorkers.length+' closed bids: '+marketTrader._closedBids.length+' profit: '+marketTrader.profitBalance+' op balance: '+marketTrader.operatingBalance+' portfolio:'+portfolioPrice);
-
-		// const table = new Table({
-		// 	head: ['Pending', 'Closed'],
-		// 	chars: {'mid': '', 'left-mid': '', 'mid-mid': '', 'right-mid': ''},
-		// 	});
 
 
 		let waitingForSellCount = 0;
@@ -300,61 +366,123 @@ class ConsoleUI {
 		}
 
 		this._closedBidsBox.setData(closedBidsRows);
+		this._screen.render();
+	}
 
-// // table is an Array, so you can `push`, `unshift`, `splice` and friends
-// table.push(
-//     ['First value', 'Second value']
-//   , ['First value', 'Second value']
-// );
+	static setMarketTraders(marketTraders) {
+		this._marketTraders = marketTraders;
+	}
 
-		// this.out(table.toString());
+	static drawPrevMarketTrader() {
+		let cKeyIndex = Object.keys(this._marketTraders).indexOf(this._marketTraderKeyToRender);
+		cKeyIndex--;
+		if (cKeyIndex < 0) {
+			cKeyIndex = Object.keys(this._marketTraders).length - 1;
+		}
+		this._marketTraderKeyToRender = Object.keys(this._marketTraders)[cKeyIndex];
+
+		this.drawMarketTrader(this._marketTraders[this._marketTraderKeyToRender]);
+	}
+
+	static drawNextMarketTrader() {
+		let cKeyIndex = Object.keys(this._marketTraders).indexOf(this._marketTraderKeyToRender);
+		cKeyIndex++;
+		if (Object.keys(this._marketTraders).length <= cKeyIndex) {
+			cKeyIndex = 0;
+		}
+		this._marketTraderKeyToRender = Object.keys(this._marketTraders)[cKeyIndex];
+
+		this.drawMarketTrader(this._marketTraders[this._marketTraderKeyToRender]);
+	}
+
+	static scheduleMarketTradersLoop() {
+		this._marketTraderKeyToRender = Object.keys(this._marketTraders)[0];
+		setInterval(()=>{
+			if (!this.wasPausePressed()) {
+				this.drawNextMarketTrader();
+			} else {
+				this.drawMarketTrader(this._marketTraders[this._marketTraderKeyToRender]);
+			}
+		}, 10000);
 	}
 
 	static async drawTimePrice(price) {
+		if (!price) {
+			price = this._lastDisplayedPriceCombined;
+		}
+		this._lastDisplayedPriceCombined = price;
+
 		const displayPrevPricesShift = true;
+
+		let dateTo = moment(new Date(price.time));
+		let combinedPriceForTheChart = price;
+		let chartLabel = '5 minutes interval';
+		if (this._statsOption == '2') {
+			combinedPriceForTheChart = await price.getInterval(HistoricalMarket.INTERVALS.MIN15);
+			chartLabel = '15 minutes interval';
+		}
+		if (this._statsOption == '3') {
+			combinedPriceForTheChart = await price.getInterval(HistoricalMarket.INTERVALS.HOUR1);
+			chartLabel = '1 hour interval';
+		}
+		if (this._statsOption == '4') {
+			combinedPriceForTheChart = await price.getInterval(HistoricalMarket.INTERVALS.MIN5);
+			chartLabel = '5 minutes interval True Range Percents';
+		}
+		if (this._statsOption == '5') {
+			combinedPriceForTheChart = await price.getInterval(HistoricalMarket.INTERVALS.MIN15);
+			chartLabel = '15 minutes interval True Range Percents';
+		}
+		if (this._statsOption == '6') {
+			combinedPriceForTheChart = await price.getInterval(HistoricalMarket.INTERVALS.HOUR1);
+			chartLabel = '1 hour interval True Range Percents';
+		}
+
 		let maxPrevPrices = 140;
 
 		const values = new Array(maxPrevPrices);
-		const times = new Array(maxPrevPrices);
+		const highs = new Array(maxPrevPrices);
+		const lows = new Array(maxPrevPrices);
 
 		let dateFrom = null;
-		let dateTo = null;
-		let prevPrice = price;
+		let prevPrice = combinedPriceForTheChart;
 		for (let i = 0; i < maxPrevPrices; i++) {
-			values[maxPrevPrices - 1 - i] = prevPrice.price;
-			if (!dateTo) {
-				dateTo = moment(new Date(prevPrice.time));
+			if (this._statsOption == '4' || this._statsOption == '5' || this._statsOption == '6') {
+				values[maxPrevPrices - 1 - i] = await prevPrice.getAverageTrueRangePercent();
+			} else {
+				values[maxPrevPrices - 1 - i] = prevPrice.price;
+				highs[maxPrevPrices - 1 - i] = prevPrice.high;
+				lows[maxPrevPrices - 1 - i] = prevPrice.low;
 			}
 
 			prevPrice = await prevPrice.getPrev();
 		}
 		dateFrom = moment(new Date(prevPrice.time));
 
-		// if (displayPrevPricesShift) {
-		// 	const shifts = await price.getShifts(48);
-		// 	let shiftsStringMIN5 = this.shiftsToString(shifts);
+		this._chartBox.setLabel({text: ''+this._baseCurrency+'/'+this._quoteCurrency+' - '+chartLabel+' - '+dateTo.format('MMMM Do YYYY, HH:mm')+' : '+this._lastPrice,side:'left'});
 
-		// 	const intervalHOUR1 = await price.getInterval(HistoricalMarket.INTERVALS.HOUR1);
-		// 	const shiftsHOUR1 = await intervalHOUR1.getShifts(24);
-		// 	let shiftsStringHOUR1 = this.shiftsToString(shiftsHOUR1);
+		let chartData = values;
+		if (this._statsOption == '1' || this._statsOption == '2' || this._statsOption == '3') {
+			chartData = [lows, highs];
+		}
 
-		// 	const intervalDAY1 = await price.getInterval(HistoricalMarket.INTERVALS.DAY1);
-		// 	const shiftsDAY1 = await intervalDAY1.getShifts(7);
-		// 	let shiftsStringDAY1 = this.shiftsToString(shiftsDAY1);
+		let content = asciichart.plot(chartData,
+			{
+				height: 20,
+				offset: 2,
+			    format:  (x, i)=>{
+			    	let length = Math.ceil(Math.abs(Math.log10(this._tickSize)));
+			    	let totalLength = length + 5 + 1;
+			    	return (' '.repeat(totalLength) + x.toFixed(length)).slice(-totalLength);
+			    },
+			    colors: [
+			        asciichart.red,
+			        asciichart.green,
+			        asciichart.blue,
+			        undefined, // equivalent to default
+			    ],
+			});
 
-		// 	const intervalWEEK1 = await price.getInterval(HistoricalMarket.INTERVALS.WEEK1);
-		// 	const shiftsWEEK1 = await intervalWEEK1.getShifts(4);
-		// 	let shiftsStringWEEK1 = this.shiftsToString(shiftsWEEK1);
-		// }
-
-
-		// this.out(chalk.green(this.justifyString(160, dateFrom.format('     MMMM Do YYYY, HH:mm'), dateTo.format('MMMM Do YYYY, HH:mm') )));
-		// this.out(asciichart.plot (values, { height: 20, offset: 2 }));
-
-
-		this._chartBox.setLabel({text: ''+this._baseCurrency+'/'+this._quoteCurrency+' - 5 minutes interval - '+dateTo.format('MMMM Do YYYY, HH:mm')+' : '+this._lastPrice,side:'left'});
-
-		let content = asciichart.plot (values, { height: 20, offset: 2 });
 		if (displayPrevPricesShift) {
 			const shifts = await price.getShifts(48);
 			let shiftsStringMIN5 = this.shiftsToString(shifts);
@@ -380,6 +508,12 @@ class ConsoleUI {
 			// content += 'W1'+shiftsStringWEEK1+'D1'+shiftsStringDAY1+'H1'+shiftsStringHOUR1+'M5'+shiftsStringMIN5;
 		}
 
+		content += "\n";
+		content += '[1] - [6] - change view';
+
+		if (this._marketTraders) {
+			content += ' | [p] - pause current | [up][down] - switch traders';
+		}
 
 		this._chartBox.setContent(content);
 

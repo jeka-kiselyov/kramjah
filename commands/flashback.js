@@ -13,19 +13,40 @@ class Handler extends Command {
         progCommand.argument('[strategyName]', 'strategyName');
         progCommand.argument('[symbol]', 'trading symbol pair name, like btcusd');
         progCommand.argument('[ui]', 'Disply UI progress 0/1, default 0', 0);
-        progCommand.argument('[fromTime]', 'trade from timestamp, pass nothing to trade from the very begining');
-        progCommand.argument('[toTime]', 'trade to timestamp, pass nothing to trade to the very end');
+        progCommand.argument('[fromTime]', 'trade from timestamp, pass nothing to trade from the very begining, 0 - to trade from the begining');
+        progCommand.argument('[toTime]', 'trade to timestamp, pass nothing to trade to the very end, 0 - to trade to the very end');
+        progCommand.argument('[startBalance]', 'trade balance of currency in the begining, 1000 by default');
     }
 
     async handle(args, options, logger) {
         if (args.ui == '0') args.ui = false;
 
+        if (args.ui) {
+            const rawLogger = logger;
+            logger = {
+                info: (...fArgs)=>{
+                    if (ConsoleUI.isInitialized()) {
+                        ConsoleUI.debug.apply(ConsoleUI, fArgs);
+                    } else {
+                        rawLogger.info.apply(rawLogger, fArgs);
+                    }
+                }
+            };
+        }
+
         const currentPath = process.cwd();
         const filename = path.join(currentPath, args.filename);
 
+        let startBalance = null;
+        if (args.startBalance && args.startBalance != '0') {
+            startBalance = parseFloat(args.startBalance, 10);
+        }
+
         const marketTrader = new MarketTrader({
+            operatingBalance: startBalance,
             strategyName: args.strategyName,
             symbol: args.symbol,
+            logger: logger,
         });
 
         try {
@@ -55,7 +76,7 @@ class Handler extends Command {
         let endTime = historicalEndTime;
 
         let curTimeInSeconds = (+new Date())/1000;
-        if (args.fromTime) {
+        if (args.fromTime && args.fromTime != '0') {
             startTime = parseInt(args.fromTime, 10);
             if (startTime > curTimeInSeconds) {
                 // passed in milliseconds, all is fine
@@ -64,7 +85,7 @@ class Handler extends Command {
             }
         }
 
-        if (args.toTime) {
+        if (args.toTime & args.toTime != '0') {
             endTime = parseInt(args.toTime, 10);
             if (endTime > curTimeInSeconds) {
                 // passed in milliseconds, all is fine
@@ -72,6 +93,11 @@ class Handler extends Command {
                 endTime = Math.floor(endTime * 1000);
             }
         }
+
+
+        // startTime += 200 * 60 * 60 * 1000;
+        //
+        //
         // startTime = 1513345911000;
         // endTime = 1513345911000 + 30*12*24*60*60*1000;
 
@@ -86,7 +112,10 @@ class Handler extends Command {
         logger.info(' from '+new Date(startTime));
         logger.info('   to '+new Date(endTime));
 
-        if (args.ui) await ConsoleUI.initialize();
+
+        if (args.ui) {
+            await ConsoleUI.initialize();
+        }
 
         let price = null;
         let time = startTime; // startTime + (1000*60*5)*120;

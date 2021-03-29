@@ -17,13 +17,29 @@ class Handler extends Command {
     }
 
     async handle(args, options, logger) {
+        if (args.ui) {
+            const rawLogger = logger;
+            logger = {
+                info: (...fArgs)=>{
+                    if (ConsoleUI.isInitialized()) {
+                        ConsoleUI.debug.apply(ConsoleUI, fArgs);
+                    } else {
+                        rawLogger.info.apply(rawLogger, fArgs);
+                    }
+                }
+            };
+        }
+        // if (args.ui) await ConsoleUI.initialize();
+
         const symbol = args.symbol;
 
         const marketTrader = new MarketTrader({
             symbol: symbol,
             mode: 'market',
             strategyName: args.strategyName,
+            logger: logger,
         });
+        const realMarketData = new RealMarketData();
 
         try {
             await marketTrader.prepareSymbolInfo(); // load symbol information from market (this api is public, no api keys needed)
@@ -33,14 +49,14 @@ class Handler extends Command {
             this.program.exit(null);
         }
 
+        logger.info('Restoring bids data from market...');
         await marketTrader.restoreDataFromMarket();
+
 
         const currentPath = process.cwd();
         const filename = path.join(currentPath, args.filename);
 
-        // const marketTrader = new MarketTrader();
-
-        logger.info('Checking integrity of .dat file: '+filename);
+        logger.info('Loading .dat file with historical prices: '+filename);
 
         let timeStart = +new Date();
 
@@ -51,54 +67,31 @@ class Handler extends Command {
         let timeEnd = +new Date();
         logger.info('Loaded in '+(timeEnd - timeStart)+' ms');
 
-        let realMarketData = new RealMarketData();
+        logger.info('Getting prices till now from real market... Run refreshdat over .dat file to make this step faster.');
 
-        let toTime = (new Date()).getTime();
-        let fromTime = historicalMarket.getEndTime();
+        await historicalMarket.fulfilTillNow(symbol);
 
-        fromTime  -= 7*24*60*60*1000; // move for one top level interval to the past to be sure we cover gaps
+        logger.info('Filling prices gaps in last 2 weeks');
 
-        while (fromTime < toTime) {
-            let getTo = fromTime + 24 * 60 * 60 * 1000;
-            let data = await realMarketData.getM5Candles(symbol, fromTime, getTo);
+        await historicalMarket.fillGaps();
 
-            let addedPricePoints = 0;
-            for (let item of data) {
-                await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(item);
-                addedPricePoints++;
-            }
-            logger.info('Added '+addedPricePoints+' prices');
+        logger.info('Checking integrity...');
 
-            await new Promise((res)=>{ setTimeout(res, 500); });
-            fromTime += 24 * 60 * 60 * 1000;
+        if (!historicalMarket.isIntegrityOk()) {
+            throw new Error('Integrity is broken. Run refreshdat over .dat file');
+        } else {
+            logger.info('Integrity is ok');
         }
 
-        logger.info('Checking integrity');
-
-        let topLevelIntervals = historicalMarket.getTopLevelIntervals();
-        let thereIsNotFull = 0;
-        let fullIntervals = 0;
-        for (let topLevelInterval of topLevelIntervals) {
-            if (!topLevelInterval.isFull()) {
-                thereIsNotFull++;
-                logger.info((thereIsNotFull == 1 ? 'OK' : 'ERROR')+' Top level interval '+new Date(topLevelInterval.time)+' is not full');
-            } else {
-                fullIntervals++;
-            }
+        if (args.ui) {
+            await ConsoleUI.initialize();
         }
 
-        if (thereIsNotFull > 1) {
-            this.program.exit(0);
-        }
-
-        if (args.ui) await ConsoleUI.initialize();
-
-        let price = null;
         let time = (new Date()).getTime();
+        let price = null;
         let i = 0;
         do {
             const ticker = await realMarketData.getTicker(symbol);
-            // console.log(ticker);
 
             if (ticker) {
                 await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(ticker);
@@ -116,22 +109,15 @@ class Handler extends Command {
                     }
                 }
 
-                if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
-                // if (args.ui) await ConsoleUI.setBaseCurrency(marketTrader.baseCurrency);
-                // if (args.ui) await ConsoleUI.setQuoteCurrency(marketTrader.quoteCurrency);
-                // if (args.ui) await ConsoleUI.setLastPrice(price.price);
                 try {
-                    if (args.ui) await ConsoleUI.drawTimePrice(price);
                     if (args.ui) await ConsoleUI.drawMarketTrader(marketTrader);
-                    if (args.ui) ConsoleUI.swawBuffers();
-                    if (!args.ui) logger.info(price.price);
+                    if (!args.ui) logger.info('Current price: '+price.price);
                 } catch(e) {
                     logger.info(e);
                     throw e;
                 }
             }
 
-            // if (args.ui) await new Promise((res)=>{ setTimeout(res, 1000); });
             await new Promise((res)=>{ setTimeout(res, 10000); });
         } while(true);
 

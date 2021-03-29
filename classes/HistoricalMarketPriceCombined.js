@@ -227,7 +227,9 @@ class HistoricalMarketPriceCombined {
 
 		if (this._prices.length != thereShouldBeNPrices) {
 			// there're not full set of lower interval prices
-			console.error('should be '+thereShouldBeNPrices+' but there '+this._prices.length);
+			console.error('should be '+thereShouldBeNPrices+' but there '+this._prices.length, this.time, this.interval);
+			// console.log(this._prices[0].time);
+			// console.log(this._prices[1].time);
 			// console.error(this._prices[0]._prices[0]._prices[0]._prices[0]._prices[0]._prices[0]._prices[0]);
 			return false;
 		}
@@ -239,6 +241,46 @@ class HistoricalMarketPriceCombined {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Sometimes there're skiped candles on the market. Full empty low level intervals with approximated data
+	 * @return {[type]} [description]
+	 */
+	async makeFull() {
+		if (this.isFull()) {
+			return true;
+		}
+
+		const intervalIndex = this._historicalMarket.RAWINTERVALS.indexOf(this.interval);
+		if (intervalIndex == 0) {
+			// lowest interval is always full
+			return true;
+		}
+
+		const lowerInterval = this._historicalMarket.RAWINTERVALS[intervalIndex - 1];
+		const thereShouldBeNPrices = Math.floor(this.interval / lowerInterval);
+
+		if (this._prices.length == thereShouldBeNPrices) {
+			// make children full
+			for (let price of this._prices) {
+				price.makeFull();
+			}
+		} else {
+			// child one is skiped
+			let time = this.time;
+			for (let i = 0; i < thereShouldBeNPrices; i++) {
+				let thereIs = await this._historicalMarket.getCombinedPrice(time, lowerInterval);
+
+				if (!thereIs) {
+					thereIs = new HistoricalMarketPriceCombined({row: data, historicalMarket: this});
+				}
+
+				time += lowerInterval;
+			}
+
+			const price = new HistoricalMarketPrice({row: data, historicalMarket: this});
+		}
 	}
 
 	async mergeUpdatedChild(priceCombined) {
@@ -262,6 +304,10 @@ class HistoricalMarketPriceCombined {
 
 			if (iToRemove !== null) {
 				debug('Removing outdated priceCombined %p', this._prices[iToRemove]);
+
+				if (this._prices[iToRemove]._low < priceCombined._low) priceCombined._low = this._prices[iToRemove]._low;
+				if (this._prices[iToRemove]._high > priceCombined._high) priceCombined._high = this._prices[iToRemove]._high;
+
 				this._prices.splice(iToRemove, 1);
 			}
 			// add new
@@ -301,6 +347,24 @@ class HistoricalMarketPriceCombined {
 		} while(curShift <= maxShifts);
 
 		return shifts;
+	}
+
+	getTrueRange() {
+		return Math.abs(this.high - this.low);
+		return Math.max(Math.abs(this.high - this.low), Math.abs(this.high - this.close), Math.abs(this.low - this.close));
+	}
+
+	async getAverageTrueRangePercent(rolling = 7) {
+		let sum = 0;
+		let i = 0;
+		let prev = this;
+		do {
+			sum += (prev.getTrueRange() / prev.price);
+
+			prev = await prev.getPrev();
+		} while(i++ < rolling && prev);
+
+		return ((sum / i)) * 100;
 	}
 };
 
