@@ -1,8 +1,13 @@
 # Kramjah
 
-Node.js trading bot application. Simple trading strategy included. Works over HitBTC exchange with any trading pair, but feel free to fork it and change to any exchange, should be relatively simple to.
+Node.js trading bot application. Simple trading strategy included. Works over HitBTC exchange with any trading pair, but feel free to fork it and change to any exchange, should be relatively simple to. 
 
-![Kramjah in action](https://user-images.githubusercontent.com/1434612/110217873-3a7c2580-7ebf-11eb-862c-da91c15d548e.gif)
+
+![Kramjah in action](https://user-images.githubusercontent.com/1434612/110217873-3a7c2580-7ebf-11eb-862c-da91c15d548e.gif)  | ![photo_2021-03-20_15-22-24](https://user-images.githubusercontent.com/1434612/112845420-83ce2800-90ad-11eb-9356-b11c2f549bdf.jpg)
+------------- | -------------
+
+
+
 
 ### Installation
 
