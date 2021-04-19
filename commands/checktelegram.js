@@ -10,7 +10,8 @@ class Handler extends Command {
 
     async handle(args, options, logger) {
         logger.info('Open the bot you have token name of TELEGRAM_BOT_TOKEN in .env file in telegram and send some message to it');
-        let message = await Notificator.waitForMessage();
+        let message  = {};
+        // message = await Notificator.waitForMessage();
 
         if (message && message.from && message.from.id) {
             logger.info('Got a message. User id is: '+message.from.id);
@@ -20,7 +21,13 @@ class Handler extends Command {
             logger.info('Can not connect to telegram bot. Check TELEGRAM_BOT_TOKEN .env variable');
         }
 
-        await Notificator.stop();
+        Notificator.onMessage((message)=>{
+            console.log(message);
+        });
+
+        await new Promise((res)=>{ setTimeout(res, 120000); });
+
+        // await Notificator.stop();
 
         // console.log(message);
         //

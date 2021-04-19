@@ -10,7 +10,7 @@ class TradingApi {
 		const credentials = Buffer.from(apiKey + ':' + secretKey).toString('base64');
 		this._api = axios.create({
 			baseURL: 'https://api.hitbtc.com/api/2/',
-			timeout: 6000,
+			timeout: 10000,
 			headers: {
 				'Authorization': ('Basic ' + credentials)
 			}
@@ -68,6 +68,20 @@ class TradingApi {
 		return ret;
 	}
 
+	async getAccountBalance() {
+		let url = 'account/balance';
+		let resp = await this._api.get(url);
+
+		let ret = [];
+		for (let item of resp.data) {
+			if (item.available != '0' || item.reserved != '0') {
+				ret.push(item);
+			}
+		}
+
+		return ret;
+	}
+
 	beSureThereIsCacheFor(symbol) {
 		if (!this._recentActiveOrders[symbol]) {
 			this._recentActiveOrders[symbol] = [];
@@ -94,6 +108,7 @@ class TradingApi {
 	async getHistoryOrderByClientOrderId(params) {
 		let clientOrderId = params.clientOrderId || null;
 		let url = 'history/order/?clientOrderId='+clientOrderId;
+
 
 		if (!clientOrderId) {
 			throw new Error('invalid clientOrderId');
@@ -131,12 +146,131 @@ class TradingApi {
 		}
 	}
 
+	async getRecentOrdersBySymbolAndStrategyName(params) {
+		let outdatedToo = params.outdatedToo;
+		let notOursToo = params.notOursToo;
+
+		let symbol = params.symbol; // ETHBTC or BTCUSD or others
+		symbol = (''+symbol).toUpperCase();
+
+		const strategyName = params.strategyName || null;
+
+		if (!strategyName || !symbol) {
+			throw new Error('Both strategyName and symbol required');
+		}
+
+
+		let activeOrders = await this.getActiveOrders({
+			symbol: symbol,
+		});
+		let historyOrders = await this.getHistoryOrders({
+			symbol: symbol,
+		});
+
+		let lastCount = historyOrders.length;
+		let offset = 1000;
+		while (lastCount >= 1000) { // if count = limit, ask for more
+			const moreItems = await this.getHistoryOrders({
+				symbol: symbol,
+				offset: offset,
+			});
+
+			historyOrders = historyOrders.concat(moreItems);
+			lastCount = moreItems.length;
+			offset += 1000;
+		}
+
+		console.log('activeOrders', activeOrders.length);
+		console.log('historyOrders', historyOrders.length);
+
+		let byOriginalPriceGroup = {
+
+		};
+
+		let orderToPriceGroup = (order)=>{
+			order.createdAt = new Date(order.createdAt);
+			// order.createdAt.setTime(order.createdAt.getTime() + Math.random()*1000)
+			let clientOrderId = order.clientOrderId;
+			if (order.symbol == symbol) {
+				if (clientOrderId.indexOf('_') != -1 || notOursToo) {  // made by us
+					let clientOrderIdItems = clientOrderId.split('_');
+
+					let originalPrice = parseFloat(clientOrderIdItems[0], 10);
+					let itemStrategyName = clientOrderIdItems[1];
+
+					// we process only orders placed on same trading pair by same strategy name
+					if (notOursToo && strategyName != itemStrategyName) {
+						order.notOurs = true;
+					}
+
+					if (notOursToo || strategyName == itemStrategyName) {
+						if (!byOriginalPriceGroup[''+originalPrice]) {
+							byOriginalPriceGroup[''+originalPrice] = [];
+						}
+
+						order.originalPrice = originalPrice;
+
+						byOriginalPriceGroup[''+originalPrice].push(order);
+					} else {
+					}
+				} else {
+					console.log('not us');
+					console.log(order);
+				}
+			}
+		}
+
+		for (let order of activeOrders) {
+			orderToPriceGroup(order);
+		}
+		for (let order of historyOrders) {
+			orderToPriceGroup(order);
+		}
+
+		const importantOrders = [];
+
+		for (let originalPriceKey in byOriginalPriceGroup) {
+			let orders = byOriginalPriceGroup[originalPriceKey];
+		    orders.sort(function(a, b) { return b.createdAt - a.createdAt; }); /// sort DESC by createdAt
+
+		    let mostRecentOrder = orders[0];
+
+		    mostRecentOrder.previousOrders = orders.slice(1); // all previous orders
+
+		    if (mostRecentOrder.status == 'filled' && mostRecentOrder.side == 'buy') {
+		    	// bought while we was offline, but sell order on top of it was not created
+		    	importantOrders.push(mostRecentOrder);
+		    } else if (mostRecentOrder.status == 'partiallyFilled' || mostRecentOrder.status == 'new') {
+		    	// active order, not filled, not cancelled
+		    	if (mostRecentOrder.side == 'sell') {
+		    		// to sell order
+		    	} else {
+		    		// to buy order
+		    	}
+		    	importantOrders.push(mostRecentOrder);
+		    } else {
+		    	// cancelled probably
+		    	if (outdatedToo) {
+			    	importantOrders.push(mostRecentOrder);
+		    	}
+		    }
+		}
+
+	    importantOrders.sort(function(a, b) { return b.originalPrice - a.originalPrice; }); /// sort DESC by originalPrice
+
+		return importantOrders;
+	}
+
 	async getHistoryOrders(params) {
 		// https://api.hitbtc.com/#orders-history
 		let symbol = params.symbol; // ETHBTC or BTCUSD or others
 		symbol = (''+symbol).toUpperCase();
 
-		let url = 'history/order?symbol='+symbol;
+		let url = 'history/order?limit=1000&symbol='+symbol;
+
+		if (params.offset) {
+			url += '&offset='+params.offset;
+		}
 
 		try {
 			let resp = await this._api.get(url);

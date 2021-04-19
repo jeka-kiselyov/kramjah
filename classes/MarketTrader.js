@@ -83,6 +83,10 @@ class MarketTrader {
 		return this._quoteCurrency;
 	}
 
+	get symbol() {
+		return this._symbol;
+	}
+
 	async prepareSymbolInfo() {
 		if (this._symbolInfoPrepared) {
 			return true;
@@ -113,7 +117,8 @@ class MarketTrader {
 		if (!this._tickSize || this._tickSize >= 1) {
 			throw new Error('I am not sure tickSize is ok, please check: '+this._tickSize);
 		}
-		if (!this._quantityIncrement || this._quantityIncrement > 1) {
+
+		if (!this._quantityIncrement || this._quantityIncrement > 10) {
 			throw new Error('I am not sure quantityIncrement is ok, please check: '+this._quantityIncrement);
 		}
 
@@ -153,6 +158,7 @@ class MarketTrader {
 	}
 
 	async getAvailableCurrency() {
+		// console.log(this.getUsedCurrency());
 		return (await this._strategy.getMaxOperatingBalance() - this.getUsedCurrency());
 	}
 
@@ -230,6 +236,8 @@ class MarketTrader {
 		// console.error('workOnBalance', workOnBalance);
 
 		if (workOnBalance < minBid || workOnBalance > this._operatingBalance || workOnBalance > availableCurrency) {
+			console.log('can not create', workOnBalance < minBid, workOnBalance > this._operatingBalance, workOnBalance > availableCurrency);
+			console.log(workOnBalance, availableCurrency);
 			return false;
 		}
 
@@ -362,10 +370,18 @@ class MarketTrader {
 			    	this.log('There is filled buy order on price of '+originalPriceKey+' adding to be sold order over it');
 
 			    	this._mode = 'simulation';
+			    	// console.log(mostRecentOrder);
+			    	// console.log(mostRecentOrder.price);
+			    	// console.log(mostRecentOrder.clientOrderId);
 			    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
+			    	bidWorker._gonnaBuy = parseFloat(mostRecentOrder.cumQuantity, 10);
 
 			    	this._mode = 'market';
+			    	// if (mostRecentOrder.clientOrderId == '0.680678_Simple_589609') die;
+
 			    	await bidWorker.wasBought();
+
+
 			    } else if (mostRecentOrder.status == 'partiallyFilled' || mostRecentOrder.status == 'new') {
 			    	// order is active actually
 			    	this.log('There is pending order on price of '+originalPriceKey+' side: '+mostRecentOrder.side);

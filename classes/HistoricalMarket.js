@@ -506,7 +506,7 @@ class HistoricalMarket extends IndexedCSV {
         let toTime = (new Date()).getTime();
         let fromTime = this.getEndTime();
 
-        fromTime  -= 7*24*60*60*1000; // move for one top level interval to the past to be sure we cover gaps
+        fromTime  -= 8*24*60*60*1000; // move for one top level interval to the past to be sure we cover gaps
 
         while (fromTime < toTime) {
             let getTo = fromTime + 24 * 60 * 60 * 1000;
@@ -524,6 +524,47 @@ class HistoricalMarket extends IndexedCSV {
         return true;
 	}
 
+	async fillOlderGaps() {
+        let topLevelIntervals = this.getTopLevelIntervals();
+        let thereIsNotFull = 0;
+        let fullIntervals = 0;
+        let lastProcessedPriceCombined = null;
+
+        let curTime = (new Date()).getTime();
+
+        const interval = RAWINTERVALS[0];
+        for (let topLevelInterval of topLevelIntervals) {
+            if (topLevelInterval.time < (curTime - 7*24*60*60*1000) && !topLevelInterval.isFull()) {
+
+            	let getTo = topLevelInterval.time + 7*24*60*60*1000;
+				for (let timeToCheck = topLevelInterval.time - 15*60*60*1000; timeToCheck < getTo; timeToCheck += interval) {
+					let foundCombined = this.isThereCombinedPrice(timeToCheck, interval);
+					if (!foundCombined) {
+					    // logger.info('Not added for '+timeToCheck);
+					    if (lastProcessedPriceCombined) {
+						    const item = {
+						        time: timeToCheck,
+						        volume: lastProcessedPriceCombined.volume,
+						        high: lastProcessedPriceCombined.high,
+						        low: lastProcessedPriceCombined.low,
+						        open: lastProcessedPriceCombined.open,
+						        close: lastProcessedPriceCombined.close,
+						    };
+						    await this.pushLowestCombinedIntervalRAWAndRecalculateParents(item);
+					    }
+					} else {
+					    lastProcessedPriceCombined = foundCombined;
+					}
+
+					if (!this.isThereCombinedPrice(timeToCheck, interval)) {
+					    logger.info('Bad!');
+					}
+				}
+
+            }
+        }
+	}
+
 	/**
 	 * Fill gaps in prices so there's price for every low level interval even if there were no trades on the market
 	 * @param  {[type]} timeOffset time offset in microseconds to the past. Default is 2 weeks
@@ -531,7 +572,7 @@ class HistoricalMarket extends IndexedCSV {
 	 */
 	async fillGaps(timeOffset) {
 		if (!timeOffset) {
-			timeOffset = 2 * 14*24*60*60*1000; // fill gaps in last two weeks by default. You'd better run refresh dat to update .dat file at least once in two weeks
+			timeOffset = 14*24*60*60*1000; // fill gaps in last two weeks by default. You'd better run refresh dat to update .dat file at least once in two weeks
 		}
 
         let toTime = (new Date()).getTime();

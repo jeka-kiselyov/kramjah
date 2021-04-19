@@ -4,7 +4,9 @@ const path = require('path');
 const HistoricalMarket = require('../classes/HistoricalMarket.js');
 const RealMarketData = require('../classes/RealMarketData.js');
 const ConsoleUI = require('../classes/ConsoleUI.js');
+const TradingApi = require('../classes/TradingApi.js');
 
+const Notificator = require('../classes/Notificator.js');
 const MarketTrader = require('../classes/MarketTrader.js');
 
 class Handler extends Command {
@@ -38,6 +40,13 @@ class Handler extends Command {
         } else {
             logger.info('There re '+config.traders.length+' traders defined in settings');
         }
+
+        await Notificator.onMessage(async (message)=>{
+            if (message && message.text && message.text.indexOf('balance') != -1) {
+                const tradingApi = new TradingApi();
+                await Notificator.logAccountBalance(tradingApi);
+            }
+        });
 
         const marketTraders = {};
 
@@ -93,6 +102,10 @@ class Handler extends Command {
 
             await marketTrader.historicalMarket.fillGaps();
 
+            logger.info('Filling older gaps if there are any');
+
+            await marketTrader.historicalMarket.fillOlderGaps();
+
             logger.info('Checking integrity...');
 
             if (!marketTrader.historicalMarket.isIntegrityOk()) {
@@ -122,38 +135,90 @@ class Handler extends Command {
                 const historicalMarket = marketTrader.historicalMarket;
                 const symbol = marketTrader._symbol;
 
-                const ticker = await realMarketData.getTicker(symbol);
+                let forTheRace = new Promise((res)=>{
+                    realMarketData.getTicker(symbol)
+                        .then(async(ticker)=>{
+                            let price = null;
+                            let time = null;
 
-                let price = null;
-                let time = null;
+                            if (ticker) {
+                                await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(ticker);
+                                time = ticker.time;
 
-                if (ticker) {
-                    await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(ticker);
-                    time = ticker.time;
+                                price = await historicalMarket.getPriceAt(time);
+                                price = await price.getInterval(HistoricalMarket.INTERVALS.MIN5); // price is pricecombined now
 
-                    price = await historicalMarket.getPriceAt(time);
-                    price = await price.getInterval(HistoricalMarket.INTERVALS.MIN5); // price is pricecombined now
+                                if (price) {
+                                    try {
+                                        await marketTrader.processNewCombinedPrice(price);
+                                    } catch(e) {
+                                        console.error(e);
+                                    }
+                                }
 
-                    if (price) {
-                        try {
-                            await marketTrader.processNewCombinedPrice(price);
-                        } catch(e) {
-                            console.error(e);
-                        }
-                    }
+                                // if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
 
-                    // if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
+                                try {
+                                    // if (args.ui) await ConsoleUI.drawTimePrice(price);
+                                    // if (args.ui) await ConsoleUI.drawMarketTrader(marketTrader);
+                                    // if (args.ui) ConsoleUI.swawBuffers();
+                                    if (!args.ui) logger.info(''+marketTraderKey+' - current price: '+price.price);
+                                } catch(e) {
+                                    logger.info(e);
+                                    throw e;
+                                }
+                            }
 
-                    try {
-                        // if (args.ui) await ConsoleUI.drawTimePrice(price);
-                        // if (args.ui) await ConsoleUI.drawMarketTrader(marketTrader);
-                        // if (args.ui) ConsoleUI.swawBuffers();
-                        if (!args.ui) logger.info(''+marketTraderKey+' - current price: '+price.price);
-                    } catch(e) {
-                        logger.info(e);
-                        throw e;
-                    }
-                }
+                            res();
+                        });
+                });
+
+                // limit single trade itteration execution to 20 seconds
+                //
+                try {
+                    await Promise.race([forTheRace, new Promise((res)=>{ setTimeout(res, 20000); })]);
+                } catch(e) {}
+
+                // try {
+                //     const marketTrader = marketTraders[marketTraderKey];
+                //     const historicalMarket = marketTrader.historicalMarket;
+                //     const symbol = marketTrader._symbol;
+
+                //     const ticker = await realMarketData.getTicker(symbol);
+
+                //     let price = null;
+                //     let time = null;
+
+                //     if (ticker) {
+                //         await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(ticker);
+                //         time = ticker.time;
+
+                //         price = await historicalMarket.getPriceAt(time);
+                //         price = await price.getInterval(HistoricalMarket.INTERVALS.MIN5); // price is pricecombined now
+
+                //         if (price) {
+                //             try {
+                //                 await marketTrader.processNewCombinedPrice(price);
+                //             } catch(e) {
+                //                 console.error(e);
+                //             }
+                //         }
+
+                //         // if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
+
+                //         try {
+                //             // if (args.ui) await ConsoleUI.drawTimePrice(price);
+                //             // if (args.ui) await ConsoleUI.drawMarketTrader(marketTrader);
+                //             // if (args.ui) ConsoleUI.swawBuffers();
+                //             if (!args.ui) logger.info(''+marketTraderKey+' - current price: '+price.price);
+                //         } catch(e) {
+                //             logger.info(e);
+                //             throw e;
+                //         }
+                //     }
+                // } catch(e) {
+                //     console.error(e);
+                // }
 
                 await new Promise((res)=>{ setTimeout(res, 2000); });
             }

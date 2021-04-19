@@ -42,7 +42,7 @@ class Handler extends Command {
         logger.info('Filling prices gaps in last 2 weeks');
 
         await historicalMarket.fillGaps();
-
+        await historicalMarket.fillOlderGaps();
 
         logger.info('Checking integrity');
 

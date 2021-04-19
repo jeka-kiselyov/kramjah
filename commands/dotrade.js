@@ -45,6 +45,8 @@ class Handler extends Command {
             await marketTrader.prepareSymbolInfo(); // load symbol information from market (this api is public, no api keys needed)
             logger.info('Got symbol infromation from the market: '+args.symbol);
         } catch(e) {
+            console.log(e);
+
             logger.error('Can not get symbol information from the market');
             this.program.exit(null);
         }
@@ -74,6 +76,10 @@ class Handler extends Command {
         logger.info('Filling prices gaps in last 2 weeks');
 
         await historicalMarket.fillGaps();
+
+        logger.info('Filling older gaps if there re any');
+
+        await historicalMarket.fillOlderGaps();
 
         logger.info('Checking integrity...');
 

@@ -5,11 +5,15 @@ const ObjectsToCsv = require('objects-to-csv');
 
 class Handler extends Command {
     setup(progCommand) {
-        progCommand.argument('[symbol]', 'trading symbol pair name, like btcusd');
+        progCommand.argument('[quoteCurrency]', 'quoteCurrency to filter by, BTC, USD, ETH');
+        progCommand.argument('[minimumDayQuoteCurrencyVolume]', 'value for minimum last day volume in quote curency to check');
     }
 
     async handle(args, options, logger) {
         const symbol = args.symbol;
+
+        const minimumDayQuoteCurrencyVolume = parseFloat(args.minimumDayQuoteCurrencyVolume, 10);
+        const quoteCurrency = args.quoteCurrency ? (''+args.quoteCurrency).toUpperCase() : null;
 
         let realMarketData = new RealMarketData();
 
@@ -20,7 +24,14 @@ class Handler extends Command {
 
         let c = 0;
         for (let symbolInfo of allSymbols) {
-            // if (symbolInfo.quoteCurrency != 'BTC') continue;
+            if (quoteCurrency && symbolInfo.quoteCurrency != quoteCurrency) continue;
+
+            const lastD1Candle = await realMarketData.getLastD1Candle(symbolInfo.id);
+            const lastDayQuoteCurrencyVolume = lastD1Candle ? parseFloat(lastD1Candle.volumeQuote, 10) : 0;
+
+            if (minimumDayQuoteCurrencyVolume && minimumDayQuoteCurrencyVolume > lastDayQuoteCurrencyVolume) continue;
+
+            // console.log(symbolInfo); continue;
 
             const symbolEvaluation = await realMarketData.evaluateSymbol(symbolInfo.id);
             symbolEvaluations.push(symbolEvaluation);

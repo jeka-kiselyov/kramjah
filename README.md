@@ -44,7 +44,7 @@ No need to remember all symbol-strategies you are trading over. Edit `traders` a
 - [5] - 15 minutes volatility chart
 - [6] - 1 hour volatility chart
 - [up] - next trader (if trading over settings/setting.js file)
-- [up] - prev trader (if trading over settings/setting.js file)
+- [down] - prev trader (if trading over settings/setting.js file)
 - [p] - pause next trader loop for 30 seconds (if trading over settings/setting.js file)
 - [l] - show/hide debug dialog
 - [q][ctrl+c] - quit
@@ -79,6 +79,7 @@ For faster initialization, refresh .dat file, run `node app.js refreshdat path/t
 - Run `node app.js checktelegram` and send another message to the bot while command is running
 - Command will show you your telegram user id, add it to .env file as line of `TELEGRAM_NOTIFY_USER_ID=xxxxx`
 - Bot will send you telegram notification on any successful sale with profit.
+- If trading over few pairs with `node app.js trade` command, you can ask bot to check your profits balance. Send `/balance` command to it.
 
 ### Want to simulate trading on different time interval?
 

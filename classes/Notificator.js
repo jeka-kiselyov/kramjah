@@ -39,6 +39,22 @@ class Notificator {
 		}
 	}
 
+	static async onMessage(func) {
+		if (!(await this.initialize() )) return false;
+
+		if (this._onMessageHandlerAdded) {
+			throw new Error('Adding another onMessage handler is not supported');
+		}
+
+		this._slimbot.startPolling();
+		this._slimbot.on('message', message => {
+			func(message);
+		});
+		this._onMessageHandlerAdded = true;
+
+		return true;
+	}
+
 	static async waitForMessage() {
 		if (!(await this.initialize() )) return false;
 
@@ -55,6 +71,24 @@ class Notificator {
 		if (!(await this.initialize() )) return false;
 
 		this._slimbot.sendMessage(process.env.TELEGRAM_NOTIFY_USER_ID, message);
+	}
+
+	static async logAccountBalance(tradingApi) {
+		let text = '';
+
+        const mainBalance = await tradingApi.getAccountBalance();
+        const tradingBalance = await tradingApi.getTradingBalance();
+        for (let mainBalanceItem of mainBalance) {
+	        for (let tradingBalanceItem of tradingBalance) {
+	        	if (mainBalanceItem.currency == tradingBalanceItem.currency) {
+	        		if (mainBalanceItem.available || tradingBalanceItem.available || tradingBalanceItem.reserved) {
+		                text += ''+mainBalanceItem.currency+' Main Account: '+mainBalanceItem.available+' Avail: '+tradingBalanceItem.available+' Reserved: '+tradingBalanceItem.reserved+"\n\n";
+	        		}
+	        	}
+	        }
+        }
+
+        await this.log(text);
 	}
 
 };

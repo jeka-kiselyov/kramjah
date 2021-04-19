@@ -374,6 +374,10 @@ class ConsoleUI {
 	}
 
 	static drawPrevMarketTrader() {
+		if (!this._marketTraders) {
+			return false;
+		}
+
 		let cKeyIndex = Object.keys(this._marketTraders).indexOf(this._marketTraderKeyToRender);
 		cKeyIndex--;
 		if (cKeyIndex < 0) {
@@ -385,6 +389,10 @@ class ConsoleUI {
 	}
 
 	static drawNextMarketTrader() {
+		if (!this._marketTraders) {
+			return false;
+		}
+
 		let cKeyIndex = Object.keys(this._marketTraders).indexOf(this._marketTraderKeyToRender);
 		cKeyIndex++;
 		if (Object.keys(this._marketTraders).length <= cKeyIndex) {
@@ -525,7 +533,7 @@ class ConsoleUI {
 
 		for (let i = shifts.length - 1; i>=0; i--) {
 			let shift = shifts[i];
-			let strVal = Math.abs(Math.floor(shift));
+			let strVal = Math.floor(Math.abs(shift));
 			if (strVal > 9) strVal = 9;
 			if (shift < 0) {
 				shiftsString+=chalk.black.bgRed(strVal);

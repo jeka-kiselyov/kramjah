@@ -21,6 +21,8 @@ class MarketTraderBidWorker extends EventEmitter {
 		this._waitingForSell = false;
 		this._waitingForPrice = null;
 
+		this._expectGrowthByPercent = null;
+
 		this._originalTargetPrice = null;
 
 		this._balances = [0,0];
@@ -155,16 +157,27 @@ class MarketTraderBidWorker extends EventEmitter {
 
 		const willTakeFee = this._operatingBalance * (this._makerFeePercents / 100);
 		this._gonnaBuy = (this._operatingBalance - willTakeFee) / this._waitingForPrice;
-		this._gonnaBuy = Math.round(this._gonnaBuy * (1/this._quantityIncrement)) / (1/this._quantityIncrement);
+
+
+		// console.log(this._gonnaBuy);
+
+		this._gonnaBuy = Math.ceil(this._gonnaBuy * (1/this._quantityIncrement)) / (1/this._quantityIncrement);
 
 		this._gonnaPay = this._gonnaBuy * this._waitingForPrice;
 		this._gonnaPay += this._gonnaPay * (this._makerFeePercents / 100);
+
+		// console.log(this._gonnaBuy);
+		// console.log(this._gonnaPay);
 
 		while(this._gonnaPay > this._operatingBalance) {
 			this._gonnaBuy -= this._quantityIncrement;
 			this._gonnaPay = this._gonnaBuy * this._waitingForPrice;
 			this._gonnaPay += this._gonnaPay * (this._makerFeePercents / 100);
 		};
+
+		// console.log(this._gonnaBuy);
+		// console.log(this._gonnaBuy.toFixed(Math.ceil(Math.abs(Math.log10(this._quantityIncrement)))));
+
 
 		if (this.mode == 'market') {
 			this._lastOrderClientOrderId = this.generateClientOrderId();
@@ -173,6 +186,8 @@ class MarketTraderBidWorker extends EventEmitter {
 			let quantityToApi = this._gonnaBuy.toFixed(Math.ceil(Math.abs(Math.log10(this._quantityIncrement)))); // love js? Trick to get rid of extra 0.0...0000001
 			let priceToApi = this._waitingForPrice.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
 
+			this._gonnaBuy = parseFloat(quantityToApi, 10); // just double check value is correct
+
 			await this._tradingApi.placeBuyOrder({
 				clientOrderId: this._lastOrderClientOrderId,
 				symbol: this.symbol,
@@ -180,6 +195,27 @@ class MarketTraderBidWorker extends EventEmitter {
 				price: priceToApi,
 			});
 		}
+	}
+
+	async changeExpectedGrowthPercent(newPercent) {
+		if (!this._waitingForSell || this._isArchived) {
+			return false;
+		}
+
+		if (newPercent == this._expectGrowthByPercent) {
+			return true;
+		}
+
+		this._expectGrowthByPercent = newPercent;
+		let sellTargetPrice = (this._originalTargetPrice * (1+newPercent / 100));
+
+		if (this._lastRunPriceCombined && sellTargetPrice < this._lastRunPriceCombined.price) {
+			sellTargetPrice = this._lastRunPriceCombined.price;
+		}
+
+		this._waitingForPrice = sellTargetPrice;
+
+		// @todo: update on market if mode == market
 	}
 
 	async waitForSellAt(price) {
@@ -229,7 +265,7 @@ class MarketTraderBidWorker extends EventEmitter {
 			});
 
 			if (success) {
-				await Notificator.log('💰 +'+amountToApi+this._marketTrader._quoteCurrency);
+				await Notificator.log('💰 +' + amountToApi + this._marketTrader._quoteCurrency +' from ' + this._marketTrader._baseCurrency);
 			}
 		}
 
@@ -246,6 +282,7 @@ class MarketTraderBidWorker extends EventEmitter {
 		this._waitingForBuy = false;
 		this._lastOrderClientOrderId = null;
 
+		this._expectGrowthByPercent = expectGrowthByPercent;
 		let sellTargetPrice = (this._waitingForPrice * (1+expectGrowthByPercent / 100));
 		if (resellAtPrice) {
 			sellTargetPrice = resellAtPrice;
@@ -299,6 +336,7 @@ class MarketTraderBidWorker extends EventEmitter {
 
 		if (orderOnMarket.status == 'filled') {
 			if (this._waitingForBuy) {
+				this._gonnaBuy = parseFloat(orderOnMarket.cumQuantity, 10);
 				await this.wasBought();
 			} else if (this._waitingForSell) {
 				await this.wasSold();
@@ -329,6 +367,8 @@ class MarketTraderBidWorker extends EventEmitter {
 					await this.wasSold();
 				}
 			}
+
+			this._lastRunPriceCombined = priceCombined;
 
 			return;
 		}
