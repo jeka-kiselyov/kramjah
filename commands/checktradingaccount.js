@@ -108,10 +108,13 @@ class Handler extends Command {
             }
 
             if (!order.notOurs) {
-                // console.log('-----');
-                // console.log('-'+order.originalPrice+'-'+order.side+'-'+order.status+'--'+order.quantity);
+                console.log('-----');
+
+                let sum = parseFloat(order.price, 10) * parseFloat(order.cumQuantity, 10);
+
+                console.log('-'+order.originalPrice+'-'+order.side+'-'+order.status+'--'+sum);
             } else {
-                // console.log('-'+order.clientOrderId+'-'+order.side+'-'+order.status+'--'+order.quantity);
+                console.log('-'+order.clientOrderId+'-'+order.side+'-'+order.status+'--'+order.quantity);
             }
 
             let groupSellCount = 0;
@@ -121,7 +124,9 @@ class Handler extends Command {
             for (let olderOrder of order.previousOrders) {
                 if (olderOrder.status == 'filled') {
 
-                    // console.log('-'+olderOrder.createdAt+'-'+olderOrder.originalPrice+'-'+olderOrder.side+'-'+olderOrder.status+'-'+olderOrder.cumQuantity);
+                    let sum = parseFloat(olderOrder.price, 10) * parseFloat(olderOrder.cumQuantity, 10);
+
+                    console.log('-'+olderOrder.createdAt+'-'+olderOrder.originalPrice+'-'+olderOrder.side+'-'+olderOrder.status+'-'+sum+'-'+olderOrder.price+'-'+olderOrder.cumQuantity);
 
                     if (olderOrder.side == 'buy' && !order.notOurs) totalBought += parseFloat(olderOrder.cumQuantity, 10);
                     if (olderOrder.side == 'sell' && !order.notOurs) totalSold += parseFloat(olderOrder.cumQuantity, 10);

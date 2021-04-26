@@ -14,7 +14,7 @@ class MarketTrader {
 		this._bidWorkers = [];
 		this._closedBids = [];
 
-		this._originalOperatingBalance = params.operatingBalance || 1000;
+		this._originalOperatingBalance = params.operatingBalance || 2000;
 		this._operatingBalance = this._originalOperatingBalance;
 		this._profitBalance = 0;
 		this._blockedBalance = 0;
@@ -238,6 +238,7 @@ class MarketTrader {
 		if (workOnBalance < minBid || workOnBalance > this._operatingBalance || workOnBalance > availableCurrency) {
 			console.log('can not create', workOnBalance < minBid, workOnBalance > this._operatingBalance, workOnBalance > availableCurrency);
 			console.log(workOnBalance, availableCurrency);
+			console.log(workOnBalance, this._operatingBalance);
 			return false;
 		}
 
@@ -321,6 +322,20 @@ class MarketTrader {
 				symbol: this._symbol,
 			});
 
+
+			let lastCount = historyOrders.length;
+			let offset = 1000;
+			while (lastCount >= 1000) { // if count = limit, ask for more
+				const moreItems = await this._tradingApi.getHistoryOrders({
+					symbol: this._symbol,
+					offset: offset,
+				});
+
+				historyOrders = historyOrders.concat(moreItems);
+				lastCount = moreItems.length;
+				offset += 1000;
+			}
+
 			let byOriginalPriceGroup = {
 
 			};
@@ -389,7 +404,7 @@ class MarketTrader {
 			    	this._mode = 'simulation';
 			    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
 
-			    	if (mostRecentOrder.side == 'sell') {
+			    	if (mostRecentOrder.side == 'sell' && bidWorker) {
 			    		let resellAtPrice = parseFloat(mostRecentOrder.price, 10);
 			    		await bidWorker.wasBought(resellAtPrice);
 			    	}

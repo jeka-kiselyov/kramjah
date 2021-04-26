@@ -589,16 +589,17 @@ class HistoricalMarket extends IndexedCSV {
             let foundCombined = this.isThereCombinedPrice(timeToCheck, interval);
             if (!foundCombined) {
                 // logger.info('Not added for '+timeToCheck);
-
-                const item = {
-                    time: timeToCheck,
-                    volume: lastProcessedPriceCombined.volume,
-                    high: lastProcessedPriceCombined.high,
-                    low: lastProcessedPriceCombined.low,
-                    open: lastProcessedPriceCombined.open,
-                    close: lastProcessedPriceCombined.close,
-                };
-                await this.pushLowestCombinedIntervalRAWAndRecalculateParents(item);
+                if (lastProcessedPriceCombined) {
+	                const item = {
+	                    time: timeToCheck,
+	                    volume: lastProcessedPriceCombined.volume,
+	                    high: lastProcessedPriceCombined.high,
+	                    low: lastProcessedPriceCombined.low,
+	                    open: lastProcessedPriceCombined.open,
+	                    close: lastProcessedPriceCombined.close,
+	                };
+	                await this.pushLowestCombinedIntervalRAWAndRecalculateParents(item);
+                }
             } else {
                 lastProcessedPriceCombined = foundCombined;
             }

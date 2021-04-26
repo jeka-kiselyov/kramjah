@@ -275,6 +275,8 @@ class TradingApi {
 		try {
 			let resp = await this._api.get(url);
 
+			console.log('length: ', resp.data.length);
+
 			return resp.data;
 		} catch(e) {
 			// console.error(e);
