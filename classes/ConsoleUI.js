@@ -271,22 +271,63 @@ class ConsoleUI {
 		await this.setDataFromMarketTrader(marketTrader);
 		await this.drawTimePrice(marketTrader.lastRunPriceCombined);
 
-		const portfolioPrice = marketTrader.getEstimatedPortfolioPrice();
-		const ifWouldHODLPortfolioPrice = marketTrader.getIfWouldHODLPortfolioPrice();
+		/// switch this metrics off for now, as it's not accurate when trading over few pairs.
+
+		// const portfolioPrice = marketTrader.getEstimatedPortfolioPrice();
+		// const ifWouldHODLPortfolioPrice = marketTrader.getIfWouldHODLPortfolioPrice();
 
 		const possibleBuyBids = await marketTrader.getPossibleBuyBidsCount();
 		const availCurrency = await marketTrader.getAvailableCurrency();
 
+		const evenPrice = await marketTrader.getEvenPrice();
+		const waitingPrice = await marketTrader.getProfitPrice();
+
+		const usedCurrency = marketTrader.getUsedCurrency();
+
+		const toSellItemAmount = marketTrader.getToSellItemAmount();
+
+		let pendingLoose = null;
+
+		let diffWithEven = null;
+		if (evenPrice) {
+			diffWithEven = (evenPrice * 100) / marketTrader.lastRunPriceCombined.price;
+
+			if (diffWithEven <= 100) {
+				diffWithEven = chalk.green( Math.abs(100 - diffWithEven).toFixed(2) + '%' );
+			} else {
+				diffWithEven = chalk.red( Math.abs(100 - diffWithEven).toFixed(2) + '%' );
+
+				pendingLoose = Math.abs( (toSellItemAmount * marketTrader.lastRunPriceCombined.price) - (toSellItemAmount * evenPrice) );
+			}
+		}
+
+		let diffWithProfit = null;
+		if (waitingPrice) {
+			diffWithProfit = (waitingPrice * 100) / marketTrader.lastRunPriceCombined.price;
+
+			if (diffWithProfit <= 100) {
+				diffWithProfit = chalk.green( Math.abs(100 - diffWithProfit).toFixed(2) + '%' );
+			} else {
+				diffWithProfit = chalk.red( Math.abs(100 - diffWithProfit).toFixed(2) + '%' );
+			}
+		}
+
 		const statsRows = [];
-		statsRows.push(['Profit', this.currencyFormat(marketTrader.profitBalance)]);
-		statsRows.push(['Estimated Balance', this.currencyFormat(portfolioPrice)]);
-		statsRows.push(['If Would HODL', this.currencyFormat(ifWouldHODLPortfolioPrice)]);
+		statsRows.push(['This Run Profit', this.currencyFormat(marketTrader.profitBalance)]);
+		statsRows.push(['All Time Profit', this.currencyFormat(marketTrader.getAllTimeProfit())]);
+		statsRows.push(['Pending Sells Cur Price Loose', (pendingLoose ? chalk.red('-'+this.currencyFormat(pendingLoose)) : '')]);
+		statsRows.push(['Pending Sells Even Price', ( evenPrice === 0 ? '' : this.currencyFormat(evenPrice) ) + (diffWithEven ? (' '+diffWithEven) : '') ]);
+		statsRows.push(['Pending Sells Profit Price', ( waitingPrice === 0 ? '' : this.currencyFormat(waitingPrice) ) + (diffWithProfit ? (' '+diffWithProfit) : '') ]);
+
+		// statsRows.push(['Estimated Balance', this.currencyFormat(portfolioPrice)]);
+		// statsRows.push(['If Would HODL', this.currencyFormat(ifWouldHODLPortfolioPrice)]);
+
 		statsRows.push(['Operating Balance', this.currencyFormat(marketTrader.operatingBalance)]);
 		statsRows.push(['Blocked Balance', this.currencyFormat(marketTrader.blockedBalance)]);
 		statsRows.push(['Item Balance', this.itemValueFormat(marketTrader.itemBalance)]);
 		statsRows.push(['Open Buy Bids', ''+marketTrader.getOpenBuyBidsCount()]);
 		statsRows.push(['Possible Buy Bids', ''+possibleBuyBids]);
-		statsRows.push(['Used Currency', this.currencyFormat(marketTrader.getUsedCurrency())]);
+		statsRows.push(['Used Currency', this.currencyFormat(usedCurrency)]);
 		statsRows.push(['Avail Currency', this.currencyFormat(availCurrency)]);
 
 		this._traderBox.setData(statsRows);
@@ -307,9 +348,12 @@ class ConsoleUI {
 
 			if (color) {
 				if (color == 'red') {
-					pendingBids.push({amount: this.currencyFormat(bidWorker._operatingBalance), value: bidWorker._waitingForPrice, string: ''+chalk[color](this.currencyFormat(bidWorker._waitingForPrice))+' '+this.currencyFormat(bidWorker._originalTargetPrice)});
+					let string = ''+chalk[color](this.currencyFormat(bidWorker._waitingForPrice))+' '+this.itemValueFormat(bidWorker._gonnaSell);
+					string += ' '+this.currencyFormat(bidWorker.getHistoricalProfit());
+					pendingBids.push({amount: this.currencyFormat(bidWorker._operatingBalance), value: bidWorker._waitingForPrice, string: string});
 				} else {
-					let string = chalk[color](this.currencyFormat(bidWorker._waitingForPrice))+' '+this.currencyFormat(bidWorker._gonnaPay)+' '+this.itemValueFormat(bidWorker._gonnaBuy);
+					let string = chalk[color](this.currencyFormat(bidWorker._waitingForPrice))+' '+this.itemValueFormat(bidWorker._gonnaBuy);
+					string += ' '+this.currencyFormat(bidWorker.getHistoricalProfit());
 					pendingBids.push({amount: this.currencyFormat(bidWorker._operatingBalance), value: bidWorker._waitingForPrice, string: string});
 				}
 
@@ -411,7 +455,7 @@ class ConsoleUI {
 			} else {
 				this.drawMarketTrader(this._marketTraders[this._marketTraderKeyToRender]);
 			}
-		}, 10000);
+		}, 20000);
 	}
 
 	static async drawTimePrice(price) {

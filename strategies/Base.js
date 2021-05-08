@@ -36,6 +36,16 @@ class Base {
 	}
 
 	/**
+	 * Increaase ExpectedGrowthPercent by step if sell may produce less than getMinimumProfitForASale value in profit
+	 * @param  {[type]} boughtAtPriceValue [description]
+	 * @return {[type]}                    [description]
+	 */
+	async getMinimumProfitForASale(boughtAtPriceValue) {
+		const maxBid = await this.getMaxBid(boughtAtPriceValue);
+		return (maxBid / 50);
+	}
+
+	/**
 	 * Method to overload: When we bought something, we are posting bid to sell it for (boughtPrice * (100+getExpectedGrowthPercent)/100);
 	 * @param  {Number} boughtAtPriceValue Value of price when we bought
 	 * @return {Number}                    Expected growth percent
@@ -51,6 +61,31 @@ class Base {
 	 */
 	async getMaxBid(targetPriceValue) {
 		return 5;
+	}
+
+
+
+
+	/**
+	 * Take out portion of coin before selling bid back at higher price
+	 * Useful if you want to accumulate some coin
+	 * Like trading in ETH/USD
+	 * Buy 0.1 eth for 1000 (total 100 usd)
+	 * takeOutQuantityBeforeSell() == 0.01;
+	 * getExpectedGrowthPercent() == 20;
+	 * Sell 0.09 for 1200 (got 108 USD)
+	 * Send 0.01 ETH to main account
+	 * Send 8 USD to main account
+	 * Place another buy bid for 0.1 eth for 1000 price (100 USD)
+	 * @return {[type]} [description]
+	 */
+	async getTakeOutQuantityBeforeSell() {
+		const marketTrader = this.getMarketTrader();          // MarketTrader instance
+		const quantityIncrement = marketTrader._quantityIncrement;
+
+		// should be dividable by quantityIncrement
+
+		return 0;
 	}
 
 	/**

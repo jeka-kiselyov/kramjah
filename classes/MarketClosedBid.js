@@ -8,6 +8,8 @@ class MarketClosedBid {
 		this._isSold = !params.isBought;
 
 		this._profit = params.profit || 0;
+
+		this._amount = params.amount || 0;
 	}
 
 	get atPrice() {
@@ -16,6 +18,10 @@ class MarketClosedBid {
 
 	get profit() {
 		return this._profit;
+	}
+
+	get total() {
+		return this._atPrice * this._amount;
 	}
 
 	isBought() {

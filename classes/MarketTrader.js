@@ -137,6 +137,26 @@ class MarketTrader {
 		return (this._originalOperatingBalance / this._firstRunPriceCombined.price) * this._lastRunPriceCombined.price;
 	}
 
+	getAllTimeProfit() {
+		let profit = 0;
+		for (let bidWorker of this._bidWorkers) {
+			profit += bidWorker.getHistoricalProfit();
+		}
+
+		return profit;
+	}
+
+	getToSellItemAmount() {
+		let amount = 0;
+		for (let bidWorker of this._bidWorkers) {
+			if (bidWorker.isWaitingForSell() && !bidWorker.isArchived()) {
+				amount += bidWorker._gonnaSell;
+			}
+		}
+
+		return amount;
+	}
+
 	get blockedBalance() {
 		return this._blockedBalance;
 	}
@@ -155,6 +175,44 @@ class MarketTrader {
 
 	get itemBalanceBasedOnLastPrice() {
 		return this._itemBalanceBasedOnLastPrice;
+	}
+
+	async getEvenPrice() {
+		let totalSpent = 0;
+		let totalBought = 0;
+
+		for (let bidWorker of this._bidWorkers) {
+			if (bidWorker.isWaitingForSell()) {
+				let boughtAtPrice = bidWorker._boughtAtPrice;
+				let boughtAmount = bidWorker._gonnaSell;
+
+				let spent = boughtAtPrice * boughtAmount;
+
+				totalSpent += spent;
+				totalBought += boughtAmount;
+			}
+		}
+
+		return (totalBought > 0) ? (totalSpent / totalBought) : 0;
+	}
+
+	async getProfitPrice() {
+		let totalWaiting = 0;
+		let totalBought = 0;
+
+		for (let bidWorker of this._bidWorkers) {
+			if (bidWorker.isWaitingForSell()) {
+				let waitingAtPrice = bidWorker._waitingForPrice;
+				let boughtAmount = bidWorker._gonnaSell;
+
+				let waiting = waitingAtPrice * boughtAmount;
+
+				totalWaiting += waiting;
+				totalBought += boughtAmount;
+			}
+		}
+
+		return (totalBought > 0) ? (totalWaiting / totalBought) : 0;
 	}
 
 	async getAvailableCurrency() {
@@ -224,6 +282,28 @@ class MarketTrader {
 		return false;
 	}
 
+	async addArchivedWorkerWaitingForBuyAt(price) {
+		await this.prepareSymbolInfo();
+
+		const bidWorker = new MarketTraderBidWorker({
+			marketTrader: this,
+
+			quantityIncrement: this._quantityIncrement,
+			tickSize: this._tickSize,
+
+			makerFeePercents: this._makerFeePercents,
+			tradingApi: this._tradingApi, // we are passing null here if we are in simulation mode
+		});
+
+		bidWorker._waitingForPrice = price;
+		bidWorker._originalTargetPrice = price;
+		bidWorker._isArchived = true;
+
+		this._bidWorkers.push(bidWorker);
+
+		return bidWorker;
+	}
+
 	async addBidWorkerWaitingForBuyAt(price) {
 		await this.prepareSymbolInfo();
 
@@ -260,12 +340,6 @@ class MarketTrader {
 		this._blockedBalance += bidWorker.gonnaPay;
 
 		bidWorker.on('bought', (priceValue, amount)=>{
-			const closedBid = new MarketClosedBid({
-				atPrice: priceValue,
-				isBought: true,
-			});
-			this._closedBids.unshift(closedBid);
-
 			this._itemBalance += amount;
 			this._blockedBalance -= bidWorker.gonnaPay;
 
@@ -273,20 +347,11 @@ class MarketTrader {
 		});
 
 		bidWorker.on('sold', (priceValue, amount, profit)=>{
-			const closedBid = new MarketClosedBid({
-				atPrice: priceValue,
-				profit: profit,
-				isBought: false,
-			});
-			this._closedBids.unshift(closedBid);
-
 			this._profitBalance += profit;
 
 			this._itemBalance -= amount;
 
 			this._blockedBalance += bidWorker.gonnaPay;
-
-			bidWorker.takeOutProfit(profit);
 		});
 
 		this._bidWorkers.push(bidWorker);
@@ -340,9 +405,13 @@ class MarketTrader {
 
 			};
 
+			let mostRecentCreatedOrderDate = new Date(0);
+
 			let orderToPriceGroup = (order)=>{
 
 				order.createdAt = new Date(order.createdAt);
+				order.updatedAt = new Date(order.updatedAt);
+
 				// order.createdAt.setTime(order.createdAt.getTime() + Math.random()*1000)
 				let clientOrderId = order.clientOrderId;
 				if (clientOrderId.indexOf('_') != -1 && order.symbol == this._symbol) { // made by us
@@ -353,6 +422,10 @@ class MarketTrader {
 
 					// we process only orders placed on same trading pair by same strategy name
 					if (strategyName == this._strategyName) {
+						if (order.createdAt > mostRecentCreatedOrderDate) {
+							mostRecentCreatedOrderDate = order.createdAt;
+						}
+
 						if (!byOriginalPriceGroup[''+originalPrice]) {
 							byOriginalPriceGroup[''+originalPrice] = [];
 						}
@@ -376,7 +449,7 @@ class MarketTrader {
 
 			    orders.sort(function(a, b) { return b.createdAt - a.createdAt; }); /// sort DESC by createdAt
 
-			    this.log('There re '+orders.length+' orders on market in price of '+originalPriceValue);
+			    // this.log('There re '+orders.length+' orders on market in price of '+originalPriceValue);
 
 			    let mostRecentOrder = orders[0];
 
@@ -394,9 +467,59 @@ class MarketTrader {
 			    	this._mode = 'market';
 			    	// if (mostRecentOrder.clientOrderId == '0.680678_Simple_589609') die;
 
-			    	await bidWorker.wasBought();
+			    	await bidWorker.wasBought(mostRecentOrder);
 
+			    	if (orders.length > 1) {
+			    		for (let i = 1; i < orders.length; i++) {
+			    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
+			    		}
+			    	}
+			    } else if (mostRecentOrder.status == 'filled' && mostRecentOrder.side == 'sell') {
+			    	if (mostRecentOrder.updatedAt > mostRecentCreatedOrderDate) { // order was sold while we we offline
+				    	this.log('Sold while we were offline');
 
+				    	try {
+					    	let prevOrder = null;
+					    	if (orders[1] && orders[1].side == 'buy' && orders[1].status == 'filled') {
+					    		prevOrder = orders[1];
+					    	}
+
+					    	if (prevOrder) {
+						    	this._mode = 'simulation';
+						    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
+						    	bidWorker._gonnaBuy = parseFloat(prevOrder.cumQuantity, 10);
+						    	await bidWorker.wasBought(prevOrder);
+
+					    		let resellAtPrice = parseFloat(mostRecentOrder.price, 10);
+
+						    	this._mode = 'market';
+						    	await bidWorker.wasSold(mostRecentOrder);
+
+						    	if (orders.length > 2) {
+						    		for (let i = 2; i < orders.length; i++) {
+						    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
+						    		}
+						    	}
+					    	}
+				    	} catch(e) {
+				    		console.error(e);
+				    	}
+			    	} else {
+				    	this.log('Sold long time ago, we are ignoring them');
+				    	// console.log(mostRecentOrder.updatedAt, mostRecentCreatedOrderDate)
+				    	//
+				    	this._mode = 'simulation';
+				    	let bidWorker = await this.addArchivedWorkerWaitingForBuyAt(originalPriceValue);
+				    	bidWorker._isArchived = true;
+
+			    		for (let i = 0; i < orders.length; i++) {
+			    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
+			    		}
+
+			    		console.log('had profit of', bidWorker.getHistoricalProfit());
+
+				    	this._mode = 'market';
+			    	}
 			    } else if (mostRecentOrder.status == 'partiallyFilled' || mostRecentOrder.status == 'new') {
 			    	// order is active actually
 			    	this.log('There is pending order on price of '+originalPriceKey+' side: '+mostRecentOrder.side);
@@ -406,14 +529,31 @@ class MarketTrader {
 
 			    	if (mostRecentOrder.side == 'sell' && bidWorker) {
 			    		let resellAtPrice = parseFloat(mostRecentOrder.price, 10);
-			    		await bidWorker.wasBought(resellAtPrice);
+			    		await bidWorker.wasBought(null, resellAtPrice);
+			    	} else {
+			    		bidWorker._gonnaBuy = parseFloat(mostRecentOrder.quantity, 10);
 			    	}
 
 			    	bidWorker._lastOrderClientOrderId = mostRecentOrder.clientOrderId;
 
 			    	this._mode = 'market';
+
+			    	if (orders.length > 1) {
+			    		for (let i = 1; i < orders.length; i++) {
+			    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
+			    		}
+			    	}
 			    } else {
-			    	this.log('They are cancelled, or sold long time ago, we are ignoring them');
+			    	this.log('They are cancelled probably');
+
+			    	this._mode = 'simulation';
+			    	let bidWorker = await this.addArchivedWorkerWaitingForBuyAt(originalPriceValue);
+			    	bidWorker._isArchived = true;
+
+		    		for (let i = 0; i < orders.length; i++) {
+		    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
+		    		}
+			    	this._mode = 'market';
 			    }
 			}
 

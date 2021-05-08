@@ -5,6 +5,48 @@ class Strategy extends Base {
 		super(params);
 	}
 
+
+	/**
+	 * Take out portion of coin before selling bid back at higher price
+	 * Useful if you want to accumulate some coin
+	 * Like trading in ETH/USD
+	 * Buy 0.1 eth for 1000 (total 100 usd)
+	 * takeOutQuantityBeforeSell() == 0.01;
+	 * getExpectedGrowthPercent() == 20;
+	 * Sell 0.09 for 1200 (got 108 USD)
+	 * Send 0.01 ETH to main account
+	 * Send 8 USD to main account
+	 * Place another buy bid for 0.1 eth for 1000 price (100 USD)
+	 * @return {[type]} [description]
+	 */
+	async getTakeOutQuantityBeforeSell() {
+		const marketTrader = this.getMarketTrader();          // MarketTrader instance
+		const quantityIncrement = marketTrader._quantityIncrement;
+
+		// should be dividable by quantityIncrement
+		if (marketTrader.symbol == 'ETHUSD') {
+			return quantityIncrement;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Increaase ExpectedGrowthPercent by step if sell may produce less than getMinimumProfitForASale value in profit
+	 * @param  {[type]} boughtAtPriceValue [description]
+	 * @return {[type]}                    [description]
+	 */
+	async getMinimumProfitForASale(boughtAtPriceValue) {
+		const maxBid = await this.getMaxBid(boughtAtPriceValue);
+		const marketTrader = this.getMarketTrader();          // MarketTrader instance
+
+		if (marketTrader.symbol == 'ETHUSD') {
+			return 0.01;
+		}
+
+		return (maxBid / 50);
+	}
+
 	/**
 	 * Method to overload: On initialization we determine how much money is available for this strategy to trade with
 	 * totalQuoteCurrencyBalance is the total amount available in quote currency (USD when trading on BTCUSD) on your trading account

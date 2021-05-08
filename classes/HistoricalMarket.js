@@ -605,7 +605,7 @@ class HistoricalMarket extends IndexedCSV {
             }
 
             if (!this.isThereCombinedPrice(timeToCheck, interval)) {
-                logger.info('Bad!');
+                console.log('Bad!');
             }
         }
 

@@ -1,5 +1,6 @@
 const EventEmitter = require('events');
 const Notificator = require('./Notificator.js');
+const MarketClosedBid = require('./MarketClosedBid.js');
 
 class MarketTraderBidWorker extends EventEmitter {
 	constructor(params = {}) {
@@ -29,6 +30,8 @@ class MarketTraderBidWorker extends EventEmitter {
 		this._operatingBalance = 0;
 
 		this._lastOrderClientOrderId = null;
+
+		this._closedBids = [];
 	}
 
 	log(...fArgs) {
@@ -194,6 +197,13 @@ class MarketTraderBidWorker extends EventEmitter {
 				quantity: quantityToApi,
 				price: priceToApi,
 			});
+		} else {
+			// adjust in a same way as for simulation
+			let quantityToApi = this._gonnaBuy.toFixed(Math.ceil(Math.abs(Math.log10(this._quantityIncrement)))); // love js? Trick to get rid of extra 0.0...0000001
+			// console.log(quantityToApi);
+			this._gonnaBuy = parseFloat(quantityToApi, 10); // just double check value is correct
+
+
 		}
 	}
 
@@ -233,12 +243,14 @@ class MarketTraderBidWorker extends EventEmitter {
 		this._waitingForPrice = price;
 
 		const gonnaSell = this._balances[1];
+		this._gonnaSell = gonnaSell;
 
 		if (this.mode == 'market') {
 			this._lastOrderClientOrderId = this.generateClientOrderId();
 
 			let quantityToApi = gonnaSell.toFixed(Math.ceil(Math.abs(Math.log10(this._quantityIncrement)))); // love js? Trick to get rid of extra 0.0...0000001
 			let priceToApi = this._waitingForPrice.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
+
 
 			await this._tradingApi.placeSellOrder({
 				clientOrderId: this._lastOrderClientOrderId,
@@ -249,11 +261,35 @@ class MarketTraderBidWorker extends EventEmitter {
 		}
 	}
 
+	async takeOutCoin(quantityToTakeOut) {
+		if ((this._balances[1] - quantityToTakeOut) < 0) {
+			throw new Error('Trying to took too much coins');
+		}
+
+		this._balances[1] -= quantityToTakeOut;
+
+		if (this.mode == 'market') {
+			let amountToApi = quantityToTakeOut.toFixed(Math.ceil(Math.abs(Math.log10(this._quantityIncrement))));
+
+			// @todo: check if successful
+			let success = await this._tradingApi.transferFromTradingBalance({
+				amount: amountToApi,
+				currency: this._marketTrader._baseCurrency,
+			});
+
+			if (success) {
+				await Notificator.log('💰 +' + amountToApi + '(' + this._marketTrader._baseCurrency + ')' +this._marketTrader._quoteCurrency +' from ' + this._marketTrader._baseCurrency);
+			}
+		}
+	}
+
 	async takeOutProfit(value) {
 		if ((this._balances[0] - value) < 0) {
 			throw new Error('Trying to took too much');
 		}
 		this._balances[0]-=value;
+
+
 
 		if (this.mode == 'market') {
 			let amountToApi = value.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
@@ -272,13 +308,28 @@ class MarketTraderBidWorker extends EventEmitter {
 		return true;
 	}
 
-	async wasBought(resellAtPrice) {
-		const boughtAtPrice = this._waitingForPrice;
-		const expectGrowthByPercent = await this.strategy.getExpectedGrowthPercent(boughtAtPrice);
-		const amount = this._gonnaBuy;
+	async wasBought(orderOnMarket, resellAtPrice) {
+		let boughtAtPrice = this._waitingForPrice;
+		let amount = this._gonnaBuy;
 
-		this._balances[1]+= amount;
-		this._balances[0]-= this._gonnaPay;
+		if (orderOnMarket) {
+			if (orderOnMarket.price) {
+				boughtAtPrice = parseFloat(orderOnMarket.price, 10);
+			}
+			if (orderOnMarket.quantity) {
+				amount = parseFloat(orderOnMarket.quantity, 10);
+			}
+
+			this._gonnaPay = boughtAtPrice * amount;
+		}
+
+		this._boughtAtPrice = boughtAtPrice;
+
+		const expectGrowthByPercent = await this.strategy.getExpectedGrowthPercent(boughtAtPrice);
+
+		this._balances[1] = amount;
+		this._balances[0] = 0;
+
 		this._waitingForBuy = false;
 		this._lastOrderClientOrderId = null;
 
@@ -290,12 +341,52 @@ class MarketTraderBidWorker extends EventEmitter {
 
 		this.emit('bought', boughtAtPrice, amount);
 
+		if (this.strategy.getTakeOutQuantityBeforeSell) {
+			const takeOutQuantityBeforeSell = await this.strategy.getTakeOutQuantityBeforeSell();
+
+			if (takeOutQuantityBeforeSell > 0) {
+				try {
+					await this.takeOutCoin(takeOutQuantityBeforeSell);
+				} catch(e) {
+					// console.log(e);
+
+				}
+			}
+		}
+
+		const closedBid = new MarketClosedBid({
+			atPrice: boughtAtPrice,
+			isBought: true,
+			amount: amount,
+		});
+		this._closedBids.unshift(closedBid);
+		this._marketTrader._closedBids.unshift(closedBid);
+
+		let goingToSellAndGet = sellTargetPrice * this._balances[1]  * (1 - (this._makerFeePercents / 100)); // check if we are going to make more after sell (with respect for takeOutQuantityBeforeSell)
+		let minimumProfitForASale = 0;
+		try {
+			minimumProfitForASale = await this.strategy.getMinimumProfitForASale(boughtAtPrice);
+		} catch(e) {
+			minimumProfitForASale = 0;
+		}
+
+		while (goingToSellAndGet - minimumProfitForASale <= this._gonnaPay) {
+			this._expectGrowthByPercent = this._expectGrowthByPercent + 0.1;
+			sellTargetPrice = (this._waitingForPrice * (1+this._expectGrowthByPercent / 100));
+			goingToSellAndGet = sellTargetPrice * this._balances[1]  * (1 - (this._makerFeePercents / 100));
+		}
+
 		await this.waitForSellAt(sellTargetPrice);
 	}
 
-	async wasSold() {
+	async wasSold(orderOnMarket) {
 		const soldAtPrice = this._waitingForPrice;
-		const amount = this._balances[1];
+		let amount = this._balances[1];
+
+		if (orderOnMarket && orderOnMarket.amount) {
+			amount = parseFloat(orderOnMarket.amount, 10);
+		}
+
 		const soldFor = (this._waitingForPrice*amount) * (1 - (this._makerFeePercents / 100));
 
 		this._balances[0]+= soldFor;
@@ -304,6 +395,21 @@ class MarketTraderBidWorker extends EventEmitter {
 		const madeProfitOf = soldFor - this._gonnaPay;
 
 		this.emit('sold', soldAtPrice, amount, madeProfitOf);
+
+		const closedBid = new MarketClosedBid({
+			atPrice: soldAtPrice,
+			profit: madeProfitOf,
+			isBought: false,
+			amount: amount,
+		});
+		this._closedBids.unshift(closedBid);
+		this._marketTrader._closedBids.unshift(closedBid);
+
+		try {
+			await this.takeOutProfit(madeProfitOf);
+		} catch(e) {
+
+		}
 
 		this._waitingForSell = false;
 		this._lastOrderClientOrderId = null;
@@ -337,9 +443,9 @@ class MarketTraderBidWorker extends EventEmitter {
 		if (orderOnMarket.status == 'filled') {
 			if (this._waitingForBuy) {
 				this._gonnaBuy = parseFloat(orderOnMarket.cumQuantity, 10);
-				await this.wasBought();
+				await this.wasBought(orderOnMarket);
 			} else if (this._waitingForSell) {
-				await this.wasSold();
+				await this.wasSold(orderOnMarket);
 			}
 		}
 	}
@@ -373,6 +479,58 @@ class MarketTraderBidWorker extends EventEmitter {
 			return;
 		}
 
+	}
+
+	getHistoricalProfit() {
+		let profit = 0;
+		for (let i = 0; i < this._closedBids.length; i++) {
+			if (this._closedBids[i].profit) {
+				profit += this._closedBids[i].profit;
+			}
+		}
+
+		return profit;
+	}
+
+	/**
+	 * Append history filled order. Should be added from most recent to the oldest one, by one
+	 * @param  {[type]} marketOrder [description]
+	 * @return {[type]}             [description]
+	 */
+	appendHistoryClosedBidOrder(marketOrder) {
+		if (!marketOrder.status || marketOrder.status != 'filled') {
+			return false;
+		}
+
+		const price = parseFloat(marketOrder.price, 10);
+		const amount = parseFloat(marketOrder.quantity, 10);
+
+		let isBought = false;
+		if (marketOrder.side == 'buy') {
+			isBought = true;
+		}
+
+		const closedBid = new MarketClosedBid({
+			atPrice: price,
+			isBought: isBought,
+			amount: amount,
+		});
+
+		if (isBought) {
+			// is this is 'buy' filled order, lets calculate the profit 'sell' one (added just before) made
+			if (this._closedBids[0] && this._closedBids[0].isSold()) {
+				// console.log('calculating profit for previous');
+				let thisTotal = closedBid.total;
+				let soldTotal = this._closedBids[0].total;
+
+				let profit = soldTotal - thisTotal;
+
+				// console.log('profit', profit, thisTotal, soldTotal, amount);
+				this._closedBids[0]._profit = profit;
+			}
+		}
+
+		this._closedBids.unshift(closedBid);
 	}
 };
 

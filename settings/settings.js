@@ -11,7 +11,7 @@ module.exports = {
 	"debug": true,
 	"paths": {
 		"commands": path.join(__dirname, "../commands"),
-		"models": path.join(__dirname, "../models"),
+		"log": path.join(__dirname, "../data/application.log"),
 	},
 	"traders": [
 		{
