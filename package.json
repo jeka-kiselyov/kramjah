@@ -22,8 +22,10 @@
     "grunt-tape": "^0.1.0",
     "lovacli": "^0.1.15",
     "moment": "^2.29.1",
+    "node-machine-id": "^1.1.12",
     "objects-to-csv": "^1.3.6",
     "slimbot": "^5.0.0",
-    "tap": "^14.11.0"
+    "tap": "^14.11.0",
+    "ws": "^7.4.5"
   }
 }
