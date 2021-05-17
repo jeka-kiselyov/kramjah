@@ -43,7 +43,8 @@ class Handler extends Command {
             notOursToo: true,
         });
 
-        // console.log(importantOrders);
+        console.log(importantOrders);
+        die;
 
         let toBuyOrderCount = 0;
         let toSellOrderCount = 0;
@@ -112,9 +113,9 @@ class Handler extends Command {
 
                 let sum = parseFloat(order.price, 10) * parseFloat(order.cumQuantity, 10);
 
-                console.log('-'+order.originalPrice+'-'+order.side+'-'+order.status+'--'+sum);
+                console.log(order.clientOrderId+'-'+order.originalPrice+'-'+order.side+'-'+order.status+'--'+sum);
             } else {
-                console.log('-'+order.clientOrderId+'-'+order.side+'-'+order.status+'--'+order.quantity);
+                console.log(order.clientOrderId+'-'+order.clientOrderId+'-'+order.side+'-'+order.status+'--'+order.quantity);
             }
 
             let groupSellCount = 0;

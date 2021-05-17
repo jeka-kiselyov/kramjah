@@ -454,26 +454,30 @@ class MarketTrader {
 			    let mostRecentOrder = orders[0];
 
 			    if (mostRecentOrder.status == 'filled' && mostRecentOrder.side == 'buy') {
-			    	// most recent was bought while we were offline
-			    	this.log('There is filled buy order on price of '+originalPriceKey+' adding to be sold order over it');
+			    	if (mostRecentOrder.updatedAt > mostRecentCreatedOrderDate) { // order was bought while we we offline
+				    	// most recent was bought while we were offline
+				    	this.log('There is filled buy order on price of '+originalPriceKey+' adding to be sold order over it');
 
-			    	this._mode = 'simulation';
-			    	// console.log(mostRecentOrder);
-			    	// console.log(mostRecentOrder.price);
-			    	// console.log(mostRecentOrder.clientOrderId);
-			    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
-			    	bidWorker._gonnaBuy = parseFloat(mostRecentOrder.cumQuantity, 10);
+				    	this._mode = 'simulation';
+				    	// console.log(mostRecentOrder);
+				    	// console.log(mostRecentOrder.price);
+				    	// console.log(mostRecentOrder.clientOrderId);
+				    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
+				    	bidWorker._gonnaBuy = parseFloat(mostRecentOrder.cumQuantity, 10);
 
-			    	this._mode = 'market';
-			    	// if (mostRecentOrder.clientOrderId == '0.680678_Simple_589609') die;
+				    	this._mode = 'market';
+				    	// if (mostRecentOrder.clientOrderId == '0.680678_Simple_589609') die;
 
-			    	await bidWorker.wasBought(mostRecentOrder);
+				    	await bidWorker.wasBought(mostRecentOrder);
 
-			    	if (orders.length > 1) {
-			    		for (let i = 1; i < orders.length; i++) {
-			    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
-			    		}
-			    	}
+				    	if (orders.length > 1) {
+				    		for (let i = 1; i < orders.length; i++) {
+				    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
+				    		}
+				    	}
+				    } else {
+				    	this.log('Bought long time ago, we are ignoring them');
+				    }
 			    } else if (mostRecentOrder.status == 'filled' && mostRecentOrder.side == 'sell') {
 			    	if (mostRecentOrder.updatedAt > mostRecentCreatedOrderDate) { // order was sold while we we offline
 				    	this.log('Sold while we were offline');
