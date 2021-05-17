@@ -232,10 +232,6 @@ class TradingApi {
 		for (let originalPriceKey in byOriginalPriceGroup) {
 			let orders = byOriginalPriceGroup[originalPriceKey];
 
-			if (originalPriceKey == '3378.477') {
-				console.log(orders); die;
-			}
-
 		    orders.sort(function(a, b) { return b.createdAt - a.createdAt; }); /// sort DESC by createdAt
 
 		    let mostRecentOrder = orders[0];
