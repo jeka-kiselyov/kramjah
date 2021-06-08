@@ -79,6 +79,18 @@ class Strategy extends Base {
 	}
 
 	/**
+	 * Snap target price to a fixed step. return 50; and it will place bids for 1600..1650..1700..1750 etc
+	 * return null; and it will use general percent step
+	 * @param  {[type]} targetPriceValue [description]
+	 * @return {[type]}                  [description]
+	 */
+	async snapTargetPriceTo(targetPriceValue) {
+		const marketTrader = this.getMarketTrader();          // MarketTrader instance
+
+		return null;
+	}
+
+	/**
 	 * Method to overload: Amount to be spent for new bidworker to be scheduled
 	 * @param  {Number} targetPriceValue price value of bidworker to target to buy at
 	 * @return {Number}                      Max amount to be spent for new bidworker
@@ -186,6 +198,11 @@ class Strategy extends Base {
 
 
 		for (let priceTarget of priceTargets) {
+			let snapPriceTo = await this.snapTargetPriceTo(priceTarget);
+			if (snapPriceTo) {
+				priceTarget = Math.floor(priceTarget / snapPriceTo) * snapPriceTo;
+			}
+
 			availableCurrency = await this.asyncGetAvailableCurrency();
 			possibleBuyBidsCount = Math.floor(availableCurrency / maxBid);
 

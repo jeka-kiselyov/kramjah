@@ -316,9 +316,9 @@ class MarketTrader {
 		// console.error('workOnBalance', workOnBalance);
 
 		if (workOnBalance < minBid || workOnBalance > this._operatingBalance || workOnBalance > availableCurrency) {
-			console.log('can not create', workOnBalance < minBid, workOnBalance > this._operatingBalance, workOnBalance > availableCurrency);
-			console.log(workOnBalance, availableCurrency);
-			console.log(workOnBalance, this._operatingBalance);
+			// console.log('can not create', this._symbol, workOnBalance < minBid, workOnBalance > this._operatingBalance, workOnBalance > availableCurrency);
+			// console.log(workOnBalance, availableCurrency);
+			// console.log(workOnBalance, this._operatingBalance);
 			return false;
 		}
 

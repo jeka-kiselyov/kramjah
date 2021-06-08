@@ -64,6 +64,18 @@ class Base {
 	}
 
 
+	/**
+	 * Snap target price to a fixed step. return 50; and it will place bids for 1600..1650..1700..1750 etc
+	 * return null; and it will use general percent step
+	 * @param  {[type]} targetPriceValue [description]
+	 * @return {[type]}                  [description]
+	 */
+	async snapTargetPriceTo(targetPriceValue) {
+		const marketTrader = this.getMarketTrader();          // MarketTrader instance
+
+		return null;
+	}
+
 
 
 	/**

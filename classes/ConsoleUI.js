@@ -6,6 +6,8 @@ const HistoricalMarket = require('../classes/HistoricalMarket.js');
 const READLINE = require('readline');
 const blessed = require('blessed');
 
+// const fs = require('fs');
+
 class ConsoleUI {
 	constructor(params = {}) {
 	}
@@ -534,6 +536,9 @@ class ConsoleUI {
 			        undefined, // equivalent to default
 			    ],
 			});
+
+		// fs.writeFileSync('data.txt', content);
+		// die;
 
 		if (displayPrevPricesShift) {
 			const shifts = await price.getShifts(48);

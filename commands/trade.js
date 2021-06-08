@@ -41,14 +41,25 @@ class Handler extends Command {
             logger.info('There re '+config.traders.length+' traders defined in settings');
         }
 
+        const marketTraders = {};
+
         await Notificator.onMessage(async (message)=>{
-            if (message && message.text && message.text.indexOf('balance') != -1) {
-                const tradingApi = new TradingApi();
-                await Notificator.logAccountBalance(tradingApi);
+            try {
+                if (message && message.text && message.text.indexOf('balance') != -1) {
+                    const tradingApi = new TradingApi();
+                    await Notificator.logAccountBalance(tradingApi);
+                }
+                if (message && message.text && message.text.indexOf('traders') != -1) {
+                    await Notificator.logMarketTraders(marketTraders);
+                }
+                if (message && message.text && message.text.indexOf('chart') != -1) {
+                    await Notificator.logChartCommand(message.text, marketTraders);
+                }
+            } catch(e) {
+
             }
         });
 
-        const marketTraders = {};
 
         for (let traderSetting of config.traders) {
             logger.info('Initializing trader '+traderSetting.symbol+' '+traderSetting.strategyName+' over dat file '+traderSetting.dat);
