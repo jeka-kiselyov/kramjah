@@ -175,6 +175,25 @@ class Notificator {
 
 		caption += ', '+priceString;
 
+		let allTimeProfit = marketTrader.getAllTimeProfit();
+		let currentLoose = await marketTrader.getCurrentLoose();
+		const possibleBuyBids = await marketTrader.getPossibleBuyBidsCount();
+
+		if (currentLoose) {
+			currentLoose = currentLoose.toFixed(Math.ceil(Math.abs(Math.log10(marketTrader._tickSize)))) + marketTrader._quoteCurrency;
+		}
+		if (allTimeProfit) {
+			allTimeProfit = allTimeProfit.toFixed(Math.ceil(Math.abs(Math.log10(marketTrader._tickSize)))) + marketTrader._quoteCurrency;
+		} else {
+			allTimeProfit = (0).toFixed(Math.ceil(Math.abs(Math.log10(marketTrader._tickSize)))) + marketTrader._quoteCurrency;
+		}
+
+		caption += "\n"+'Open bids: '+marketTrader.getOpenBuyBidsCount()+'(buy), '+marketTrader.getOpenSellBidsCount()+'(sell)';
+		caption += "\n"+'All time profit: '+allTimeProfit+' '+(currentLoose ? ('- '+currentLoose) : '');
+		caption += "\n"+'Possible buy bids: '+possibleBuyBids;
+		caption += "\n";
+		caption += "\n/traders";
+
 		const chartData = [lows, highs];
 		let content = asciichart.plot(chartData,
 			{

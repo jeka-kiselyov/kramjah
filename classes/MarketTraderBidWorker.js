@@ -278,7 +278,7 @@ class MarketTraderBidWorker extends EventEmitter {
 			});
 
 			if (success) {
-				await Notificator.log('💰 +' + amountToApi + '(' + this._marketTrader._baseCurrency + ')' +this._marketTrader._quoteCurrency +' from ' + this._marketTrader._baseCurrency);
+				await Notificator.log('💰 +' + amountToApi + '(' + this._marketTrader._baseCurrency + ')' +this._marketTrader._quoteCurrency +' from ' + this._marketTrader._baseCurrency + '  /chart_'+this._marketTrader._baseCurrency+'_'+this._marketTrader._quoteCurrency);
 			}
 		}
 	}
@@ -301,7 +301,7 @@ class MarketTraderBidWorker extends EventEmitter {
 			});
 
 			if (success) {
-				await Notificator.log('💰 +' + amountToApi + this._marketTrader._quoteCurrency +' from ' + this._marketTrader._baseCurrency);
+				await Notificator.log('💰 +' + amountToApi + this._marketTrader._quoteCurrency +' from ' + this._marketTrader._baseCurrency + '  /chart_'+this._marketTrader._baseCurrency+'_'+this._marketTrader._quoteCurrency);
 			}
 		}
 

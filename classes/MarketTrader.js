@@ -177,6 +177,25 @@ class MarketTrader {
 		return this._itemBalanceBasedOnLastPrice;
 	}
 
+	async getCurrentLoose() {
+		const evenPrice = await this.getEvenPrice();
+		const toSellItemAmount = this.getToSellItemAmount();
+
+		let pendingLoose = null;
+
+		let diffWithEven = null;
+		if (evenPrice) {
+			diffWithEven = (evenPrice * 100) / this.lastRunPriceCombined.price;
+
+			if (diffWithEven <= 100) {
+			} else {
+				pendingLoose = Math.abs( (toSellItemAmount * this.lastRunPriceCombined.price) - (toSellItemAmount * evenPrice) );
+			}
+		}
+
+		return pendingLoose;
+	}
+
 	async getEvenPrice() {
 		let totalSpent = 0;
 		let totalBought = 0;
@@ -245,6 +264,17 @@ class MarketTrader {
 		let i = 0;
 		for (let bidWorker of this._bidWorkers) {
 			if (bidWorker.isWaitingForBuy() && !bidWorker.isArchived()) {
+				i++;
+			}
+		}
+
+		return i;
+	}
+
+	getOpenSellBidsCount() {
+		let i = 0;
+		for (let bidWorker of this._bidWorkers) {
+			if (bidWorker.isWaitingForSell() && !bidWorker.isArchived()) {
 				i++;
 			}
 		}
