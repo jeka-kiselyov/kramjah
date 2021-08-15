@@ -83,7 +83,7 @@ class Notificator {
 		this._slimbot.sendMessage(process.env.TELEGRAM_NOTIFY_USER_ID, message);
 	}
 
-	static async logAccountBalance(tradingApi) {
+	static async logAccountBalance(tradingApi, marketTraders) {
 		let text = '';
 
         const mainBalance = await tradingApi.getAccountBalance();
@@ -92,7 +92,15 @@ class Notificator {
 	        for (let tradingBalanceItem of tradingBalance) {
 	        	if (mainBalanceItem.currency == tradingBalanceItem.currency) {
 	        		if (mainBalanceItem.available || tradingBalanceItem.available || tradingBalanceItem.reserved) {
-		                text += ''+mainBalanceItem.currency+' Main Account: '+mainBalanceItem.available+' Avail: '+tradingBalanceItem.available+' Reserved: '+tradingBalanceItem.reserved+"\n\n";
+	        			let toBeUsedByTraders = 0;
+						for (let marketTraderKey in marketTraders) {
+				            const marketTrader = marketTraders[marketTraderKey];
+	        				if (marketTrader._quoteCurrency == mainBalanceItem.currency) {
+	        					toBeUsedByTraders += await marketTrader.getAvailableCurrency();
+	        				}
+	        			}
+
+		                text += ''+mainBalanceItem.currency+' Main Account: '+mainBalanceItem.available+' Avail: '+tradingBalanceItem.available+' Reserved: '+tradingBalanceItem.reserved+' To Be Reserved: '+toBeUsedByTraders+"\n\n";
 	        		}
 	        	}
 	        }

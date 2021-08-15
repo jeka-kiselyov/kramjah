@@ -47,7 +47,7 @@ class Handler extends Command {
             try {
                 if (message && message.text && message.text.indexOf('balance') != -1) {
                     const tradingApi = new TradingApi();
-                    await Notificator.logAccountBalance(tradingApi);
+                    await Notificator.logAccountBalance(tradingApi, marketTraders);
                 }
                 if (message && message.text && message.text.indexOf('traders') != -1) {
                     await Notificator.logMarketTraders(marketTraders);
@@ -56,7 +56,7 @@ class Handler extends Command {
                     await Notificator.logChartCommand(message.text, marketTraders);
                 }
             } catch(e) {
-
+                console.error(e);
             }
         });
 
