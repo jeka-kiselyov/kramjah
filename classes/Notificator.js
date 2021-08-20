@@ -7,6 +7,7 @@ const fsp = require('fs').promises;
 const path = require('path');
 
 const HistoricalMarket = require('./HistoricalMarket.js');
+const RealMarketData = require('./RealMarketData.js');
 const moment = require('moment');
 
 require('dotenv').config();
@@ -84,6 +85,7 @@ class Notificator {
 	}
 
 	static async logAccountBalance(tradingApi, marketTraders) {
+		const realMarketData = new RealMarketData();
 		let text = '';
 
         const mainBalance = await tradingApi.getAccountBalance();
@@ -100,11 +102,98 @@ class Notificator {
 	        				}
 	        			}
 
-		                text += ''+mainBalanceItem.currency+' Main Account: '+mainBalanceItem.available+' Avail: '+tradingBalanceItem.available+' Reserved: '+tradingBalanceItem.reserved+' To Be Reserved: '+toBeUsedByTraders+"\n\n";
+		                text += ''+mainBalanceItem.currency+' Main Account: '+mainBalanceItem.available+' Avail: '+tradingBalanceItem.available+' Reserved: '+tradingBalanceItem.reserved+' To Be Reserved: '+toBeUsedByTraders+"\n";
 	        		}
 	        	}
 	        }
         }
+
+        // calculate estimated total
+        //
+        try {
+	    	let allSymbols = await realMarketData.getAllSymbols();
+
+	    	let balanceBTC = 0;
+	    	let balanceUSD = 0;
+	        let estimatedUSD = 0;
+	        let estimatedBTC = 0;
+	        let toTransformItems = [];
+	        let neededPairs = [];
+	        for (let tradingBalanceItem of tradingBalance) {
+	        	let itemValue = 0;
+
+		        for (let mainBalanceItem of mainBalance) {
+		        	if (mainBalanceItem.currency == tradingBalanceItem.currency) {
+		        		itemValue += parseFloat(mainBalanceItem.available);
+		        	}
+	        	}
+	        	itemValue += (parseFloat(tradingBalanceItem.available) + parseFloat(tradingBalanceItem.reserved));
+
+	        	if (itemValue > 0) {
+	        		if (tradingBalanceItem.currency === 'USD') {
+	        			balanceUSD = itemValue;
+	        			estimatedUSD += balanceUSD;
+	        		} else if (tradingBalanceItem.currency === 'BTC') {
+	        			balanceBTC = itemValue;
+	        			estimatedBTC += balanceBTC;
+	        		} else {
+	        			let totalItem = itemValue;
+	        			let toTransform = {
+	        				currency: tradingBalanceItem.currency,
+	        				value: totalItem,
+	        				usdPair: null,
+	        				btcPair: null,
+	        			};
+
+	        			for (let symbolInfo of allSymbols) {
+
+	        				if (symbolInfo.quoteCurrency == 'USD' && symbolInfo.baseCurrency == tradingBalanceItem.currency) {
+	        					toTransform.usdPair = symbolInfo.id.toUpperCase();
+	        					neededPairs.push(toTransform.usdPair);
+	        				}
+	        				if (symbolInfo.quoteCurrency == 'BTC' && symbolInfo.baseCurrency == tradingBalanceItem.currency) {
+	        					toTransform.btcPair = symbolInfo.id.toUpperCase();
+	        					neededPairs.push(toTransform.btcPair);
+	        				}
+	        			}
+
+	        			toTransformItems.push(toTransform);
+	        		}
+	        	}
+	        }
+
+	        if (toTransformItems.length) {
+	        	neededPairs.push('BTCUSD');
+
+	        	/// need to get all symbols as some of them may have special symbol name
+	        	let tickers = await realMarketData.getTickers(neededPairs);
+		        for (let symbol in tickers) {
+		        	let ticker = tickers[symbol];
+
+		        	for (let neededPair of toTransformItems) {
+		        		if (neededPair.usdPair == symbol) {
+		        			estimatedUSD += (neededPair.value * ticker.low);
+		        		}
+		        		if (neededPair.btcPair == symbol) {
+		        			estimatedBTC += (neededPair.value * ticker.low);
+		        		}
+		        	}
+		        }
+
+		        /// and transform BTC and USD to eachother
+		        let ticker = tickers['BTCUSD'];
+
+		        estimatedUSD += (balanceBTC * ticker.low);
+		        estimatedBTC += (balanceUSD / ticker.low);
+	        }
+
+
+	        text += "\nEstimated USD: "+estimatedUSD;
+	        text += "\nEstimated BTC: "+estimatedBTC;
+        } catch(e) {
+
+        }
+
 
 		text += "\n/traders";
 

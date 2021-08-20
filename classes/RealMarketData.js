@@ -45,6 +45,43 @@ class RealMarketData {
 		return null;
 	}
 
+    async getTickers(symbols) {
+        let symbolsNormalized = [];
+        for (let symbol of symbols) {
+            symbolsNormalized.push((''+symbol).toUpperCase());
+        }
+
+        let url = 'ticker?symbols='+symbolsNormalized.join(',')+'';
+
+        let resp = null;
+        try {
+            resp = await this._api.get(url);
+        } catch(e) {
+            return null;
+        }
+
+        let ret = {};
+        if (resp && resp.data && resp.data.length) {
+            for (let row of resp.data) {
+                let key = row.symbol;
+
+                let item = {
+                    time: moment(row.timestamp).valueOf(),
+                    low: parseFloat(row.bid, 10),
+                    high: parseFloat(row.ask, 10),
+                    open: parseFloat(row.open, 10),
+                    close: parseFloat(row.open, 10),
+                    volume: parseFloat(row.volume, 10),
+                    price: parseFloat(row.bid, 10),
+                };
+
+                ret[key] = item;
+            }
+        }
+
+        return ret;
+    }
+
 	async getTicker(symbol) {
 		symbol = (''+symbol).toUpperCase();
 		let url = 'ticker?symbols='+symbol+'';
