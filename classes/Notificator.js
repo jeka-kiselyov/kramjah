@@ -85,7 +85,28 @@ class Notificator {
 	}
 
 	static async logAccountBalance(tradingApi, marketTraders) {
+		const tickSizes = {
+			'USD': 0.01,
+		};
 		const realMarketData = new RealMarketData();
+    	let allSymbols = await realMarketData.getAllSymbols();
+		for (let symbolInfo of allSymbols) {
+			if (!tickSizes[symbolInfo.quoteCurrency]) {
+				tickSizes[symbolInfo.quoteCurrency] = symbolInfo.tickSize;
+			}
+			if (!tickSizes[symbolInfo.baseCurrency]) {
+				tickSizes[symbolInfo.baseCurrency] = symbolInfo.quantityIncrement;
+			}
+		}
+		const priceToString = (currency, price)=>{
+			if (tickSizes[currency]) {
+				return (parseFloat(price)).toFixed(Math.ceil(Math.abs(Math.log10(tickSizes[currency]))));
+			}
+
+			return price;
+		};
+
+
 		let text = '';
 
         const mainBalance = await tradingApi.getAccountBalance();
@@ -102,7 +123,7 @@ class Notificator {
 	        				}
 	        			}
 
-		                text += ''+mainBalanceItem.currency+' Main Account: '+mainBalanceItem.available+' Avail: '+tradingBalanceItem.available+' Reserved: '+tradingBalanceItem.reserved+' To Be Reserved: '+toBeUsedByTraders+"\n";
+		                text += ''+mainBalanceItem.currency+' Main Account: '+priceToString(mainBalanceItem.currency, mainBalanceItem.available)+' Avail: '+priceToString(mainBalanceItem.currency, tradingBalanceItem.available)+' Reserved: '+priceToString(mainBalanceItem.currency, tradingBalanceItem.reserved)+' To Be Reserved: '+priceToString(mainBalanceItem.currency, toBeUsedByTraders)+"\n\n";
 	        		}
 	        	}
 	        }
@@ -111,8 +132,7 @@ class Notificator {
         // calculate estimated total
         //
         try {
-	    	let allSymbols = await realMarketData.getAllSymbols();
-
+	    	let btcPrice = 0;
 	    	let balanceBTC = 0;
 	    	let balanceUSD = 0;
 	        let estimatedUSD = 0;
@@ -146,7 +166,6 @@ class Notificator {
 	        			};
 
 	        			for (let symbolInfo of allSymbols) {
-
 	        				if (symbolInfo.quoteCurrency == 'USD' && symbolInfo.baseCurrency == tradingBalanceItem.currency) {
 	        					toTransform.usdPair = symbolInfo.id.toUpperCase();
 	        					neededPairs.push(toTransform.usdPair);
@@ -185,11 +204,15 @@ class Notificator {
 
 		        estimatedUSD += (balanceBTC * ticker.low);
 		        estimatedBTC += (balanceUSD / ticker.low);
+
+		        btcPrice = ticker.low;
 	        }
 
 
-	        text += "\nEstimated USD: "+estimatedUSD;
-	        text += "\nEstimated BTC: "+estimatedBTC;
+	        text += "\nBTC Price: "+priceToString('USD', btcPrice);
+	        text += "\nEstimated BTC: "+priceToString('BTC', estimatedBTC);
+	        text += "\nEstimated USD: "+priceToString('USD', estimatedUSD);
+
         } catch(e) {
 
         }
