@@ -46,14 +46,16 @@ class Handler extends Command {
         await Notificator.onMessage(async (message)=>{
             try {
                 if (message && message.text && message.text.indexOf('balance') != -1) {
-                    const tradingApi = new TradingApi();
-                    await Notificator.logAccountBalance(tradingApi, marketTraders);
+                    await Notificator.logAccountBalance(marketTraders);
                 }
                 if (message && message.text && message.text.indexOf('traders') != -1) {
                     await Notificator.logMarketTraders(marketTraders);
                 }
                 if (message && message.text && message.text.indexOf('chart') != -1) {
                     await Notificator.logChartCommand(message.text, marketTraders);
+                }
+                if (message && message.text && message.text.indexOf('dispersion') != -1) {
+                    await Notificator.logDispersionCommand(message.text, marketTraders);
                 }
             } catch(e) {
                 console.error(e);
