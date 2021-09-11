@@ -161,13 +161,18 @@ class Notificator {
 		const marketStatistics = this.getMarketStatistics();
 		const dispersion = await marketStatistics.getOrdersDispersion(marketTrader);
 
-		let text = '';
+		// let text = '';
 
-		text += ''+marketTrader._baseCurrency+'/'+marketTrader._quoteCurrency+" open orders dispersion\n";
-		text += "```\n";
+		// text += ''+marketTrader._baseCurrency+'/'+marketTrader._quoteCurrency+" open orders dispersion\n";
+		// text += "```\n";
+
+		let baseCurrency = '';
+		if (dispersion[0]) {
+			baseCurrency = dispersion[0].baseCurrency;
+		}
 
 		const table = new Table({
-		    head: ['Price', 'Open Sell', 'Buy', 'Days Since', 'Expected Profit'],
+		    head: ['Price', 'Open Sell', 'Open Buy', 'HODLing '+baseCurrency, 'Days Since', 'Closed Sales', 'Expected Profit'],
 			style: {
 				'padding-left': 1,
 				'padding-right': 1,
@@ -177,13 +182,19 @@ class Notificator {
 		});
 
 		for (let dispersionItem of dispersion) {
-			table.push([dispersionItem.maxPriceAsString, dispersionItem.openOrders.sell, dispersionItem.openOrders.buy, dispersionItem.daysSinceMostRecentFilled, dispersionItem.expectedProfitAsString]);
+			table.push([dispersionItem.minPriceAsString + ' .. ' + dispersionItem.maxPriceAsString, dispersionItem.openOrders.sell, dispersionItem.openOrders.buy, dispersionItem.itemToSellAsString, dispersionItem.daysSinceMostRecentFilled, dispersionItem.filledSoldOrders, dispersionItem.expectedProfitAsString]);
 		}
 
+		let text = ''+marketTrader._baseCurrency+'/'+marketTrader._quoteCurrency+" orders\n";
 		text += table.toString();
-		text += "```\n";
 
-        await this.log(text, true); // as markdown
+		let caption = ''+marketTrader._baseCurrency+'/'+marketTrader._quoteCurrency+" open orders dispersion\n";
+
+		caption += "\n"+'Chart: /chart_'+marketTrader._baseCurrency+'_'+marketTrader._quoteCurrency;
+		caption += "\n";
+		caption += "\n/traders";
+
+		await this.uploadTextAsImage(text, caption);
 	}
 
 	static async logChartCommand(command, marketTraders) {
@@ -206,6 +217,15 @@ class Notificator {
             	await this.logMarketTraderChart(marketTrader);
             }
         }
+	}
+
+	static async uploadTextAsImage(text, caption) {
+		const buffer = text2png(text, {color: 'white', backgroundColor: '#002255', font: '14px monospace', output: 'buffer'});
+		const tempFileName = path.join(__dirname, '../data/tmp.png');
+		await fsp.writeFile(tempFileName, buffer);
+		let fileUpload = fs.createReadStream(tempFileName);
+
+		const resp = await this._slimbot.sendPhoto(process.env.TELEGRAM_NOTIFY_USER_ID, fileUpload, {caption: caption});
 	}
 
 
@@ -284,12 +304,14 @@ class Notificator {
 
 		content = title + "\n" + content + "\nKramJah";
 
-		const buffer = text2png(content, {color: 'white', backgroundColor: '#002255', font: '14px monospace', output: 'buffer'});
-		const tempFileName = path.join(__dirname, '../data/chart.png');
-		await fsp.writeFile(tempFileName, buffer);
-		let fileUpload = fs.createReadStream(tempFileName);
+		await this.uploadTextAsImage(content, caption);
 
-		const resp = await this._slimbot.sendPhoto(process.env.TELEGRAM_NOTIFY_USER_ID, fileUpload, {caption: caption});
+		// const buffer = text2png(content, {color: 'white', backgroundColor: '#002255', font: '14px monospace', output: 'buffer'});
+		// const tempFileName = path.join(__dirname, '../data/chart.png');
+		// await fsp.writeFile(tempFileName, buffer);
+		// let fileUpload = fs.createReadStream(tempFileName);
+
+		// const resp = await this._slimbot.sendPhoto(process.env.TELEGRAM_NOTIFY_USER_ID, fileUpload, {caption: caption});
 		// const resp = await this._slimbot.sendPhoto(process.env.TELEGRAM_NOTIFY_USER_ID, readable);
 	}
 

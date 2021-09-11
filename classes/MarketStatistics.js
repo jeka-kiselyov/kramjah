@@ -33,11 +33,13 @@ class MarketStatistics {
         const currentPrice = ticker.low;
 
         let quoteCurrency = null;
+        let baseCurrency = null;
         let tickSize = null;
 
         for (let marketSymbol of this._allSymbols) {
             if (marketSymbol.id == symbol) {
                 quoteCurrency = marketSymbol.quoteCurrency;
+                baseCurrency = marketSymbol.baseCurrency;
                 tickSize = marketSymbol.tickSize;
             }
         }
@@ -113,6 +115,8 @@ class MarketStatistics {
             interval.wasSoldFor = 0;
             interval.itemToSell = 0;
             interval.spentForItem = 0;
+            interval.baseCurrency = baseCurrency;
+            interval.quoteCurrency = quoteCurrency;
 
             let hasOrders = false;
 
@@ -169,6 +173,7 @@ class MarketStatistics {
             interval.expectedProfit = interval.hadProfit + interval.wouldGetIfSoldNow;
 
             interval.expectedProfitAsString = this.priceToString(quoteCurrency, interval.expectedProfit);
+            interval.itemToSellAsString = this.priceToString(baseCurrency, interval.itemToSell);
 
             if (hasOrders) {
                 intervals.push(interval);
