@@ -59,7 +59,7 @@ class MarketStatistics {
         const prices = [];
 
         for (let order of importantOrders) {
-            if (order.status == 'new') {
+            if (order.status == 'new' || order.status == 'filled') {
                 const price = parseFloat(order.originalPrice);
 
                 prices.push({
@@ -75,7 +75,7 @@ class MarketStatistics {
 
         prices.sort((a, b) => a.price - b.price);
 
-        // console.log(importantOrders); die;
+        // console.log(importantOrders);
 
         const minPrice = prices[0].price;
         let maxPrice = prices[prices.length - 1].price;
@@ -180,31 +180,7 @@ class MarketStatistics {
             }
         }
 
-        console.log(intervals);
-        let pr = 0;
-        for (let interval of intervals) {
-            pr+= (interval.expectedProfit);
-        }
-
-        console.log(pr);
-
         return intervals;
-        // intervals[intervals.length - 1].maxPrice = intervals[intervals.length - 1].maxPrice * 1.00001; // just to cover the last piece
-
-        // for (let interval of intervals) {
-
-        // }
-
-        // console.log(intervals);
-
-        // let pr = 0;
-        // for (let interval of intervals) {
-        //     pr+= (interval.expectedProfit);
-        // }
-
-        // console.log(pr);
-
-        // die;
     }
 
     /**
