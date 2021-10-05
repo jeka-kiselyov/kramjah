@@ -243,16 +243,16 @@ class HitBtcApi {
 		if (resp && resp.data) {
 			return {
 					id: symbol,
-					baseCurrency: dataItem.base_currency,
-					quoteCurrency: dataItem.quote_currency,
-					quantityIncrement: dataItem.quantity_increment,
-					tickSize: dataItem.tick_size,
-					takeLiquidityRate: dataItem.take_rate,
-				    provideLiquidityRate: dataItem.make_rate,
-				    feeCurrency: dataItem.fee_currency,
-				    marginTrading: dataItem.margin_trading,
-				    maxInitialLeverage: dataItem.max_initial_leverage,
-				    type: dataItem.type,
+					baseCurrency: resp.data.base_currency,
+					quoteCurrency: resp.data.quote_currency,
+					quantityIncrement: resp.data.quantity_increment,
+					tickSize: resp.data.tick_size,
+					takeLiquidityRate: resp.data.take_rate,
+				    provideLiquidityRate: resp.data.make_rate,
+				    feeCurrency: resp.data.fee_currency,
+				    marginTrading: resp.data.margin_trading,
+				    maxInitialLeverage: resp.data.max_initial_leverage,
+				    type: resp.data.type,
 				};
 		}
 
@@ -328,15 +328,17 @@ class HitBtcApi {
 
     async getTickers(symbols) {
 		await this.init();
-        let symbolsNormalized = [];
-        for (let symbol of symbols) {
-            symbolsNormalized.push(this.normalizeSymbol(symbol));
-        }
+        // let symbolsNormalized = [];
+        // for (let symbol of symbols) {
+        //     symbolsNormalized.push(this.normalizeSymbol(symbol));
+        // }
 
         const ret = {};
-        for (let symbol of symbolsNormalized) {
-        	const ticker = await this._hitBtcTickers.getTicker(symbol);
+        for (let symbol of symbols) {
+        	const normalizedSymbol = this.normalizeSymbol(symbol);
+        	const ticker = await this._hitBtcTickers.getTicker(normalizedSymbol);
         	ret[symbol] = ticker;
+        	ret[normalizedSymbol] = ticker;
         }
 
         return ret;

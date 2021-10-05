@@ -1,443 +1,567 @@
-const WebSocket = require('ws');
-const moment = require('moment');
-const axios = require('axios');
-require('dotenv').config();
-
 const EventEmitter = require('events');
+const HitBtcAuthedSocket = require('./HitBtcAuthedSocket.js');
+const moment = require('moment');
 
-class HitBTC extends EventEmitter {
+const HitBtcApi = require('./HitBtcApi.js');
+
+class HitBtc extends EventEmitter {
 	constructor(params = {}) {
-		super();
+		super(params);
 
-		this._logger = params.logger || null;
+		let tradingUrl = 'wss://api.demo.hitbtc.com/api/3/ws/trading';
+		if (params.demo === false) {
+			tradingUrl = 'wss://api.hitbtc.com/api/3/ws/trading';
+		}
 
-		this._timeout = 10000;
+		this._tradingSocket = new HitBtcAuthedSocket({
+			demo: params.demo,
+			url: tradingUrl,
+		});
+		this._api = new HitBtcApi({
+			demo: params.demo,
+		});
 
-		this.flushProperties();
-		this.flushData();
+		this._initialized = false;
+		this._symbols = {
+
+		};
+		this._orders = {
+
+		};
+
+		this._tradingSocket.on('authed', ()=>{
+			this.afterAuth();
+		});
+		this._tradingSocket.on('json', (data)=>{
+			this.socketData(data);
+		});
+
+		this._readyPromiseResolver = null;
+		this._readyPromise = new Promise((res)=>{
+			this._readyPromiseResolver = res;
+		});
 	}
 
-	flushProperties() {
-		this._lastCommandId = 0;
-		this._ws = null;
-		this._mostRecentMessageReceivedDate = null;
-
-		this._initializationPromise = null;
-		this._initializationPromiseResolver = null;
-
-		this._commandsAwaitors = {};
-
-		this._tickersSubscriptions = {};
-
-		this._tickersSubscriptionsPromises = {};
-		this._tickersSubscriptionsPromisesResolvers = {};
-
-		this._wsAuthPromise = null;
-		this._wsAuthPromiseResolver = null;
-
-		this._ordersSubscribed = false;
-		this._ordersSubscriptionsPromise = null;
-		this._ordersSubscriptionsPromiseResolver = null;
+	static getSingleton(demo) {
+		if (demo === false) {
+			if (HitBtc.__instance) {
+				return HitBtc.__instance;
+			} else {
+				HitBtc.__instance = new HitBtc({
+					demo: false,
+				})
+				return HitBtc.__instance;
+			}
+		} else {
+			if (HitBtc.__demoInstance) {
+				return HitBtc.__demoInstance;
+			} else {
+				HitBtc.__demoInstance = new HitBtc({
+					demo: true,
+				})
+				return HitBtc.__demoInstance;
+			}
+		}
 	}
 
-	flushData() {
-		this._tickers = {};
-		this._orders = {};
+	async waitTillReady() {
+		return await this._readyPromise;
 	}
 
 	log(...fArgs) {
+		fArgs.unshift('HitBTC');
+
 		if (this._logger) {
 			this._logger.info.apply(this._logger, fArgs);
+		} else {
+			console.log.apply(this._logger, fArgs);
 		}
 	}
 
-	heartBeat() {
-		clearTimeout(this._pingTimeout);
 
-  // Use `WebSocket#terminate()`, which immediately destroys the connection,
-  // instead of `WebSocket#close()`, which waits for the close timer.
-  // Delay should be equal to the interval at which your server
-  // sends out pings plus a conservative assumption of the latency.
-		this._pingTimeout = setTimeout(() => {
-			this.reconnect();
-		}, 30000 + 1000);
-
-	}
-
-	async reconnect() {
-		if (this._ws) {
-			this._ws.terminate();
-		}
-		this.log('Reconnecting to websocket...');
-
-		let needToResubscribeToOrders = false;
-		if (this._ordersSubscriptionsPromise) {
-			needToResubscribeToOrders = true;
-		}
-
-		this.flushProperties();
-		const success = await this.initialize();
-
-		if (needToResubscribeToOrders) {
-			if (success) {
-				this.log('Re-subscribing for orders updates');
-				await this.authWS();
-				await this.subscribeOrders();
-			} else {
-				this._ordersSubscriptionsPromise = Promise.resolve(true); // as _ordersSubscriptionsPromise was nulled with flushProperties()
+	async socketData(data) {
+		// console.log('got data', data);
+		if (data.method == 'spot_orders') {
+			for (let orderFromApi of data.params) {
+				this.storeOrderFromApi(orderFromApi);
 			}
+		} else if (data.method == 'spot_order') {
+			this.storeOrderFromApi(data.params);
 		}
+	}
+
+	async afterAuth() {
+		this.log('Subsribing to updates...');
+		const resp = await this._tradingSocket.sendRequest({
+			method: 'spot_subscribe',
+			params: {},
+		});
+
+		if (resp === true) {
+			await this.reSync();
+
+			this._readyPromiseResolver();
+
+			return true;
+		}
+		return false;
 	}
 
 	async initialize() {
-		if (this._initializationPromise) {
-			return await this._initializationPromise;
+		if (this._initialized) {
+			return true;
 		}
 
-		this.log('Initializing WebSocket connection...');
-		this.flushProperties();
-		this.heartBeat(); // try to reconnect if no luck here
+		const success = await this._tradingSocket.initialize();
+		if (!success) {
+			throw new Error('Can not initialize trading socket');
+		}
 
-		this._initializationPromise = new Promise((res)=>{
-			this._initializationPromiseResolver = res;
-		});
+		this._initialized = true;
 
-		this._api = axios.create({
-			baseURL: 'https://api.hitbtc.com/api/2/public/',
-			timeout: this._timeout,
-			headers: {'X-Custom-Header': 'kramjah'}
-		});
-		this._ws = new WebSocket('wss://api.hitbtc.com/api/2/ws', {
-			perMessageDeflate: false,
-		});
+		return true;
+	}
 
-		let success = false;
+	async reSync() {
+		const activeOrders = await this.getOrders();
+		this.log('Active orders', activeOrders.length);
+		const allHistoryOders = await this.getAllHistoryOrders();
+		this.log('History orders', allHistoryOders.length);
 
-		this._ws.on('message', (data)=>{
-			this._mostRecentMessageReceivedDate = new Date();
-			this.heartBeat();
+		for (let order of activeOrders) {
+			this.storeOrderFromApi(order);
+		}
+		for (let order of allHistoryOders) {
+			this.storeOrderFromApi(order);
+		}
 
-			let json = {};
-			try {
-				json = JSON.parse(data);
-			} catch(e) {
-
+		await this._api.init();
+		for (let symbol in this._api._symbols) {
+			if (!this._symbols[symbol]) {
+				this._symbols[symbol] = {};
 			}
-			if (json.id && this._commandsAwaitors[json.id]) {
-				this._commandsAwaitors[json.id].promiseResolver(json.result);
+		}
+
+		return true;
+	}
+
+	storeOrderFromApi(orderFromApi) {
+		const clientOrderId = orderFromApi.client_order_id;
+
+		// if (clientOrderId.indexOf('_') == -1) {  // not made by us
+		// 	return false;
+		// }
+
+		try {
+			const symbol = orderFromApi.symbol;
+			let clientOrderIdItems = clientOrderId.split('_');
+
+			let originalPrice = null;
+			let itemStrategyName = null;
+
+			if (clientOrderIdItems.length == 3) {
+				originalPrice = parseFloat(clientOrderIdItems[0], 10);
+				itemStrategyName = clientOrderIdItems[1];
+			}
+
+			const toPush = { /// transform it to apiv2 style
+				originalPrice: originalPrice,
+				strategyName: itemStrategyName,
+				symbol: symbol,
+				clientOrderId: clientOrderId,
+				price: orderFromApi.price,
+				side: orderFromApi.side,
+				type: orderFromApi.type,
+				status: orderFromApi.status,
+				quantity: orderFromApi.quantity,
+				cumQuantity: orderFromApi.quantity_cumulative,
+				createdAt: orderFromApi.created_at,
+				createdAtDate: new Date(orderFromApi.created_at),
+				updatedAt: orderFromApi.updated_at,
+				updatedAtDate: new Date(orderFromApi.updated_at),
+			};
+
+			if (this._orders[clientOrderId]) {
+				// check if updated
+				let updated = false;
+				if (toPush.status != this._orders[clientOrderId].status) {
+					updated = true;
+					this._orders[clientOrderId].status = toPush.status;
+				}
+				if (toPush.cumQuantity != this._orders[clientOrderId].cumQuantity) {
+					updated = true;
+					this._orders[clientOrderId].cumQuantity = toPush.cumQuantity;
+				}
+				if (toPush.updatedAt != this._orders[clientOrderId].updatedAt) {
+					updated = true;
+					this._orders[clientOrderId].updatedAt = toPush.updatedAt;
+					this._orders[clientOrderId].updatedAtDate = toPush.updatedAtDate;
+				}
+
+				if (updated) {
+					this.log('Order updated: '+ clientOrderId);
+					this.emit('updated', this._orders[clientOrderId]);
+				}
+
+				return;
+			}
+
+			if (!this._symbols[symbol]) {
+				this._symbols[symbol] = {};
+			}
+
+			if (itemStrategyName && originalPrice) {
+				/// our orders
+				if (!this._symbols[symbol][itemStrategyName]) {
+					this._symbols[symbol][itemStrategyName] = {};
+				}
+				if (!this._symbols[symbol][itemStrategyName][''+originalPrice]) {
+					this._symbols[symbol][itemStrategyName][''+originalPrice] = [];
+				}
+
+				this._symbols[symbol][itemStrategyName][''+originalPrice].push(toPush);
 			} else {
-				this.processNotification(json);
+				// all other orders
+				// if (!this._symbols[symbol]['undefined']) {
+				// 	this._symbols[symbol]['undefined'] = {};
+				// }
+
 			}
-		});
+			this._orders[clientOrderId] = toPush;
 
-		this._ws.on('ping', ()=>{
-				this._mostRecentMessageReceivedDate = new Date();
-				this.heartBeat();
-				this.log('got ping');
-			});
-
-		// await for initializtion
-		await new Promise((res)=>{
-			this._ws.on('open', ()=>{
-					success = true;
-					res();
-				});
-			this._ws.on('error', ()=>{
-					success = false;
-					res();
-				});
-		});
-
-		this.log('WebSocket connection initialized', success);
-
-		this._initializationPromiseResolver(success);
-
-		return success;
-	}
-
-	async authWS() {
-		if (this._wsAuthPromise) {
-			return await this._wsAuthPromise;
-		}
-		this._wsAuthPromise = new Promise((res)=>{
-			this._wsAuthPromiseResolver = res;
-		});
-
-		this.log('WebSocket auth start...');
-
-		const apiKey = process.env.HITBTC_API_KEY;
-		const secretKey = process.env.HITBTC_SECRET_KEY;
-
-		const success = await this.sendRequest('login', {
-				algo: "BASIC",
-				pKey: apiKey,
-			    sKey: secretKey,
-			});
-
-		this.log('WebSocket auth completed', success);
-
-		this._wsAuthPromiseResolver(success);
-		return success;
-	}
-
-	async subscribeOrders() {
-		if (this._ordersSubscribed) {
-			return true;
-		}
-		if (this._ordersSubscriptionsPromise) {
-			return await this._ordersSubscriptionsPromise;
+			this.log('Order added: '+ clientOrderId);
+			// console.log('order added', clientOrderId, this._orders[clientOrderId]);
+			this.emit('added', this._orders[clientOrderId]);
+		} catch(e) {
+			console.error(e);
 		}
 
-		// promise for a first received ticker
-		this._ordersSubscriptionsPromise = new Promise((res)=>{
-				this._ordersSubscriptionsPromiseResolver = res;
-			});
-
-
-		// subscribing for events
-		await this.sendRequest('subscribeReports');
-
-		// waiting for orders to be received
-		if (this._ordersSubscriptionsPromise) {
-			await this._ordersSubscriptionsPromise;
-		}
-
-		this._ordersSubscribed = true;
 	}
 
-	async getOrderByClientOrderId(symbol, clientOrderId) {
-		await this.initialize();
-		await this.authWS();
-		await this.subscribeOrders();
-
-		console.log(this._orders);
-	}
-
-	getActiveOrders(symbol) {
-		symbol = (''+symbol).toUpperCase();
-		if (!this._orders[symbol]) {
-			return [];
-		}
-		return Object.values(this._orders[symbol]);
-	}
-
-	async processNotification(json) {
-		if (json && json.method) {
-			if (json.method == 'ticker' && json.params && json.params.symbol) {
-				// ticker subscription
-				//
-				if (this._tickers[json.params.symbol]) {
-					this._tickers[json.params.symbol] = json.params;
-
-					// this.log('Got ticker', json.params.symbol);
-
-					// resolving first received ticker if there's
-					if (this._tickersSubscriptionsPromises[json.params.symbol]) {
-						this._tickersSubscriptionsPromisesResolvers[json.params.symbol]();
-
-						delete this._tickersSubscriptionsPromises[json.params.symbol];
-						delete this._tickersSubscriptionsPromisesResolvers[json.params.symbol];
-					}
-				}
-			}
-			if (json.method == 'activeOrders' && json.params && json.params.length) {
-				// activeOrders
-				//
-				for (let order of json.params) {
-					const symbol = order.symbol;
-					const clientOrderId = order.clientOrderId;
-
-					if (!this._orders[symbol]) {
-						this._orders[symbol] = {};
-					}
-
-					this._orders[symbol][clientOrderId] = order;
-				}
-
-				if (this._ordersSubscriptionsPromise) {
-					this._ordersSubscriptionsPromiseResolver();
-				}
-			}
-			if (json.method == 'report' && json.params && json.params.clientOrderId) {
-				// updated order
-				const order = json.params;
-				const symbol = order.symbol;
-				const clientOrderId = order.clientOrderId;
-
-				if (!this._orders[symbol]) {
-					this._orders[symbol] = {};
-				}
-
-				this._orders[symbol][clientOrderId] = order;
-
-				this.emit('updated', order);
-			}
-		}
-	}
-
-	async sendRequest(method, params = {}) {
+	async getOrders() {
 		await this.initialize();
 
-		this._lastCommandId++;
-		const commandId = this._lastCommandId;
-		const id = 'command_'+this._lastCommandId;
+		const resp = await this._tradingSocket.sendRequest({
+			method: 'spot_get_orders',
+		});
 
-		const data = {
-			method: method,
-			params: params,
-			id: id,
-		};
-
-		let promiseResolver = null;
-		let promise = new Promise((res)=>{ promiseResolver = res; });
-		this._commandsAwaitors[id] = {
-			promise: promise,
-			promiseResolver: promiseResolver,
-		};
-
-
-		// console.log('command ', method, 'prepared');
-
-		await Promise.race([
-					this._ws.send(JSON.stringify(data)),
-					new Promise((res)=>{ setTimeout(res, this._timeout); })
-				]);
-
-
-		// console.log('command ', method, 'sent');
-
-		const results = await Promise.race([
-					promise,
-					new Promise((res)=>{ setTimeout(res, this._timeout); })
-				]);
-
-		delete this._commandsAwaitors[id]; // free some memory
-
-		return results;
+		return resp;
 	}
 
-	async subscribeToTicker(symbol) {
-		symbol = (''+symbol).toUpperCase();
+	async getAllHistoryOrders() {
+		const maxThreads = 8;
 
-		if (this._tickersSubscriptions[symbol]) {
-			return true;
-		}
+		let historyOrders = await this._api.getHistoryOrders();
 
-		// promise for a first received ticker
-		this._tickersSubscriptionsPromises[symbol] = new Promise((res)=>{
-				this._tickersSubscriptionsPromisesResolvers[symbol] = res;
+		let currentOffset = 1000;
+		let gotLess = false;
+		const getNext = (offset) => {
+			return new Promise((res)=>{
+				this._api.getHistoryOrders({
+					offset: offset,
+				})
+				.then((moreItems)=>{
+					// console.log('offset', offset, 'length', moreItems.length);
+
+					historyOrders = historyOrders.concat(moreItems);
+					if (moreItems.length < 1000) {
+						gotLess = true;
+					}
+
+					res();
+				});
 			});
+		};
 
-		// cleaning up
-		if (!this._tickers[symbol]) {
-			this._tickers[symbol] = {};
+		while (!gotLess) {
+			const promises = [];
+			for (let i = 0; i <= maxThreads; i++) {
+				const promise = getNext(currentOffset);
+				promises.push(promise);
+				currentOffset += 1000;
+			}
+
+			await Promise.all(promises);
 		}
-		this._tickersSubscriptions[symbol] = true;
 
-		// subscribing for events
-		await this.sendRequest('subscribeTicker', {symbol: symbol});
+		return historyOrders;
+	}
 
-		// waiting for a first ticker to be received
-		if (this._tickersSubscriptionsPromises[symbol]) {
-			await this._tickersSubscriptionsPromises[symbol];
+	async getOrderByClientOrderIdWithCache(params) {
+		await this.waitTillReady();
+
+		let clientOrderId = params.clientOrderId || null;
+
+		if (this._orders[clientOrderId]) {
+			return this._orders[clientOrderId];
 		}
+
+		return null;
 	}
 
-	async unsubscribeFromTicker(symbol) {
-		symbol = (''+symbol).toUpperCase();
-		this._tickersSubscriptions[symbol] = false;
-		await this.sendRequest('unsubscribeTicker', {symbol: symbol});
-		delete this._tickers[symbol];
-	}
+	normalizeSymbol(symbol) {
+		let upperSymbol = (''+symbol).toUpperCase();
 
-	async publicGetAllSymbols() {
-		return await this.sendRequest('getSymbols', {});
-	}
-
-	async publicGetSymbolInfo(symbol) {
-		symbol = (''+symbol).toUpperCase();
-		return await this.sendRequest('getSymbol', {symbol: symbol});
-	}
-
-	async publicGetTicker(symbol) {
-		symbol = (''+symbol).toUpperCase();
-		await this.subscribeToTicker(symbol);
-
-
-		return {
-			time: moment(this._tickers[symbol].timestamp).valueOf(),
-			low: parseFloat(this._tickers[symbol].bid, 10),
-			high: parseFloat(this._tickers[symbol].ask, 10),
-			open: parseFloat(this._tickers[symbol].open, 10),
-			close: parseFloat(this._tickers[symbol].open, 10),
-			volume: parseFloat(this._tickers[symbol].volume, 10),
-			price: parseFloat(this._tickers[symbol].bid, 10),
+		if (this._symbols[upperSymbol]) {
+			return upperSymbol;
+		} else if (this._symbols[upperSymbol+'T']) { // USD -> USDT in Api V3
+			return upperSymbol+'T';
 		}
 	}
 
-    async publicGetLastD1Candle(symbol) {
-        symbol = (''+symbol).toUpperCase();
+	async getRecentOrdersBySymbolAndStrategyName(params) {
+		await this.initialize();
+		await this.waitTillReady();
 
-        let fromTimeISO = moment().subtract(1, 'day').startOf('day').toISOString();
-        let toTimeISO = moment().endOf('day').toISOString();
+		let outdatedToo = params.outdatedToo;
+		let notOursToo = params.notOursToo;
 
-        let url = 'candles?symbols='+symbol+'&period=d1&from='+fromTimeISO+'&till='+toTimeISO+'&limit=1';
+		let symbol = this.normalizeSymbol(params.symbol); // ETHBTC or BTCUSD or others
 
-        let resp = await this._api.get(url);
+		const strategyName = params.strategyName || null;
 
-        try {
+		if (!strategyName || !symbol) {
+			throw new Error('Both strategyName and symbol required');
+		}
 
-            if (resp && resp.data && resp.data[symbol]) {
-                return resp.data[symbol].map((row)=>{
-                    return {
-                        time: moment(row.timestamp).valueOf(),
-                        low: parseFloat(row.min, 10),
-                        high: parseFloat(row.max, 10),
-                        open: parseFloat(row.open, 10),
-                        close: parseFloat(row.close, 10),
-                        volume: parseFloat(row.volume, 10),
-                        volumeQuote: parseFloat(row.volumeQuote, 10),
-                    };
-                })[0];
-            }
+		const importantOrders = [];
 
-        } catch(e) {}
+		if (this._symbols[symbol][strategyName]) {
+			for (let originalPriceKey in this._symbols[symbol][strategyName]) {
 
-        return {};
+			    this._symbols[symbol][strategyName][originalPriceKey].sort(function(a, b) { return b.createdAt - a.createdAt; }); /// sort DESC by createdAt
+
+				const ordersCount = this._symbols[symbol][strategyName][originalPriceKey].length;
+				const mostRecentOrder = this._symbols[symbol][strategyName][originalPriceKey][0];
+
+				const previousOrders = this._symbols[symbol][strategyName][originalPriceKey].slice(1);
+				mostRecentOrder.previousOrders = previousOrders;
+
+			    if (mostRecentOrder.status == 'filled' && mostRecentOrder.side == 'buy') {
+			    	// bought while we was offline, but sell order on top of it was not created
+			    	importantOrders.push(mostRecentOrder);
+			    } else if (mostRecentOrder.status == 'partiallyFilled' || mostRecentOrder.status == 'new') {
+			    	// active order, not filled, not cancelled
+			    	if (mostRecentOrder.side == 'sell') {
+			    		// to sell order
+			    	} else {
+			    		// to buy order
+			    	}
+			    	importantOrders.push(mostRecentOrder);
+			    } else {
+			    	// cancelled probably
+			    	if (outdatedToo) {
+				    	importantOrders.push(mostRecentOrder);
+			    	}
+				}
+			}
+		}
+
+	    importantOrders.sort(function(a, b) { return b.originalPrice - a.originalPrice; }); /// sort DESC by originalPrice
+
+		return importantOrders;
+	}
+
+	async getAllSymbols() {
+		return await this._api.getAllSymbols();
+	}
+
+	async getSymbolInfo(symbol) {
+		return await this._api.getSymbolInfo(symbol);
+	}
+
+    async getLastD1Candle(symbol) {
+    	return await this._api.getLastD1Candle(symbol);
     }
 
-	async publicGetM5Candles(symbol, fromTime, toTime) {
-		symbol = (''+symbol).toUpperCase();
+	async getM5Candles(symbol, fromTime, toTime) {
+		return await this._api.getM5Candles(symbol, fromTime, toTime);
+	}
 
-		// symbol = BTCUSD
-		let fromTimeISO = moment(fromTime).toISOString();
-		let toTimeISO = moment(toTime).toISOString();
+    async getTickers(symbols) {
+    	return await this._api.getTickers(symbols);
+    }
 
-		let url = 'candles?symbols='+symbol+'&period=m5&from='+fromTimeISO+'&till='+toTimeISO+'&limit=1000';
+	async getTicker(symbol) {
+    	return await this._api.getTicker(symbol);
+    }
 
-		// console.log(url);
+	async getTradingBalance() {
+		return this.normalizeBalance(await this._api.getTradingBalance());
+	}
 
-		let resp = await this._api.get(url);
+	async getAccountBalance() {
+		return this.normalizeBalance(await this._api.getAccountBalance());
+	}
 
-		// console.log(data);
+	async transferFromTradingBalance(params) {
+		return await this._api.transferFromTradingBalance(params);
+	}
 
-		if (resp && resp.data && resp.data[symbol]) {
-			return resp.data[symbol].map((row)=>{
-				return {
-					time: moment(row.timestamp).valueOf(),
-					low: parseFloat(row.min, 10),
-					high: parseFloat(row.max, 10),
-					open: parseFloat(row.open, 10),
-					close: parseFloat(row.close, 10),
-					volume: parseFloat(row.volume, 10),
-					volumeQuote: parseFloat(row.volumeQuote, 10),
-				};
+	async transferToTradingBalance(params) {
+		return await this._api.transferToTradingBalance(params);
+	}
+
+	normalizeBalance(balanceApiResponse) {
+		const ret = [];
+		let hasUSD = false;
+		let usdtItem = null;
+		for (let balanceItem of balanceApiResponse) {
+			const key = balanceItem.currency;
+			const item = {
+				available: parseFloat(balanceItem.available),
+				reserved: parseFloat(balanceItem.reserved),
+				currency: balanceItem.currency,
+			};
+			item.total = item.available + item.reserved;
+
+			ret.push(item);
+			if (item.currency == 'USD') {
+				hasUSD = true;
+			} else if (item.currency == 'USDT') {
+				usdtItem = item;
+			}
+
+			// ret.push({
+			// 	available: parseFloat(balanceItem.available),
+			// 	reserved: parseFloat(balanceItem.reserved),
+			// 	currency: balanceItem.currency,
+			// });
+
+			// ret[key].total = ret[key].available + ret[key].reserved;
+		}
+
+		// copy USDT as USD?
+		if (!hasUSD && usdtItem) {
+			ret.push({
+				available: usdtItem.available,
+				reserved: usdtItem.reserved,
+				total: usdtItem.total,
+				currency: 'USD',
 			});
 		}
 
-		return [];
+		for (let item of ret) {
+			ret[item.currency] = item;
+		}
+
+		// if (ret['USDT'] && !ret['USD']) {
+		// 	ret['USD'] = ret['USDT'];
+		// }
+
+		return ret;
 	}
 
+	async placeOrder(params) {
+		await this.initialize();
+		await this.waitTillReady();
+
+		// https://api.hitbtc.com/#create-new-spot-order
+		let clientOrderId = params.clientOrderId || null;
+		let side = params.side; // buy or sell
+		let symbol = this.normalizeSymbol(params.symbol); // ETHBTC or BTCUSD or others
+
+		let type = params.type || 'limit'; // Accepted values: limit, market, stopLimit, stopMarket
+		let timeInForce = params.timeInForce || 'GTC'; // Accepted values: GTC, IOC, FOK, Day, GTD
+
+		let strictValidate = false; // Price and quantity will be checked for incrementation within the symbol’s tick size and quantity step.. See the symbol's tickSize and quantityIncrement.
+
+		let quantity = params.quantity;
+		let price = params.price;
+
+		if (quantity <= 0) {
+			throw new Error('Invalid quantity');
+		}
+
+		if (price <= 0) {
+			throw new Error('Invalid price');
+		}
+
+		let orderData = {
+			type: type,
+			symbol: symbol,
+			side: side,
+			time_in_force: timeInForce,
+			quantity: quantity,
+			price: price,
+			strict_validate: strictValidate,
+		};
+
+		if (clientOrderId) {
+			orderData.client_order_id = clientOrderId;
+		}
+
+		let resp = await this._tradingSocket.sendRequest({
+			"method": "spot_new_order",
+			"params": orderData,
+		});
+
+		if (resp) {
+			if (resp.client_order_id) {
+				resp.clientOrderId = resp.client_order_id; // support v2 style
+			}
+
+			return resp;
+		}
+
+		return false;
+	}
+
+	async placeBuyOrder(params) {
+		try {
+			params.side = 'buy';
+			return await this.placeOrder(params);
+		} catch(e) {
+			console.error(e);
+
+			return null;
+		}
+	}
+
+	async placeSellOrder(params) {
+		try {
+			params.side = 'sell';
+			return await this.placeOrder(params);
+		} catch(e) {
+			console.error(e);
+
+			return null;
+		}
+	}
+
+	async cancelOrder(params) {
+		let clientOrderId = params.clientOrderId || null;
+
+		await this.initialize();
+		await this.waitTillReady();
+
+		let resp = await this._tradingSocket.sendRequest({
+			"method": "spot_cancel_order",
+			"params": {
+				"client_order_id": clientOrderId,
+			},
+		});
+
+		if (resp) {
+			return true;
+		}
+
+		return false;
+	}
+
+
+	async normalizePrice(price, symbol) {
+		return await this._api.normalizePrice(price, symbol);
+	}
+
+	async normalizeQuantity(quantity, symbol) {
+		return await this._api.normalizeQuantity(quantity, symbol);
+	}
+
+	async close() {
+		await this._tradingSocket.close();
+		await this._api.close();
+	}
 };
 
-module.exports = HitBTC;
+module.exports = HitBtc;

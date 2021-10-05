@@ -80,7 +80,7 @@ class HitBtcTickers extends EventEmitter {
 				});
 
 			await this._publicSocket.initialize();
-			this._publicSocket.subscribeTo('ticker/1s', { "symbols": [symbol] });
+			this._publicSocket.subscribeTo('ticker/3s', { "symbols": [symbol] });
 
 			// waiting for a first ticker to be received
 			if (this._tickersSubscriptionsPromises[symbol]) {

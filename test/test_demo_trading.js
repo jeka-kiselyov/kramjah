@@ -5,7 +5,8 @@ const { test } = t;
 
 const path = require('path');
 
-const HitBtcTrading = require('../classes/markets/HitBtcTrading.js');
+const HitBtc = require('../classes/markets/HitBtc.js');
+const MarketStatistics = require('../classes/MarketStatistics.js');
 let trading = null;
 
 
@@ -24,6 +25,28 @@ const sameFloat = (t, float1, float2)=>{
 	t.same(normalizedFloat1, normalizedFloat2);
 };
 
+test('Check MarketStatistics works', async t=>{
+	const marketStatistics = new MarketStatistics();
+	const estimatedBalances = await marketStatistics.getEstimatedAccountBalance();
+
+	t.ok(estimatedBalances);
+	t.ok(estimatedBalances.BTC.total > 0);
+	t.ok(estimatedBalances.USD.total > 0);
+	t.ok(estimatedBalances.BTC.price > 0);
+
+	const evaluation = await marketStatistics.evaluateSymbol('BTCUSD');
+
+	t.ok(evaluation.symbol);
+	t.same(evaluation.symbol, 'BTCUSDT');
+	t.same(evaluation.baseCurrency, 'BTC');
+	t.same(evaluation.quoteCurrency, 'USDT');
+	t.ok(evaluation.priceOnStart);
+	t.ok(evaluation.priceOnEnd);
+	t.ok(evaluation.medianVolume);
+	t.ok(evaluation.pricesToSoldCovered);
+
+});
+
 test('Check class is ok', async t=>{
 	/// Initialize an instance,
 	/// get current ETHBTC price
@@ -34,9 +57,9 @@ test('Check class is ok', async t=>{
 	const testPriceK = 0.9;
 	const symbol = 'ETHBTC';
 
-	t.ok(HitBtcTrading);
+	t.ok(HitBtc);
 
-	trading = new HitBtcTrading();
+	trading = HitBtc.getSingleton(true);
 	t.ok(trading);
 
 	// get most recent ETHBTC price
@@ -105,9 +128,9 @@ test('Check class work with balances', async t=>{
 	const testMoveQuantity = 0.02;
 	const testMoveCurrency ='USD';
 
-	t.ok(HitBtcTrading);
+	t.ok(HitBtc);
 
-	trading = new HitBtcTrading();
+	trading = HitBtc.getSingleton(true);
 	t.ok(trading);
 
 	const tradingBalance = await trading.getTradingBalance(); // SPOT wallet
@@ -169,4 +192,8 @@ test('Check class work with balances', async t=>{
 
 test('teardown', async t=>{
 	trading.close();
+
+
+	const tradingInstance = HitBtc.getSingleton(false);
+	tradingInstance.close();
 });
