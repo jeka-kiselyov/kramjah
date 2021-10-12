@@ -10,10 +10,14 @@ class HitBtcApi {
 		let secretKey = process.env.HITBTC_DEMO_SECRET_KEY;
 		let baseURL = 'https://api.demo.hitbtc.com/api/3';
 
-		if (params.demo === false) {
+		if (process.env.HITBTC_MODE == 'market') {
 			apiKey = process.env.HITBTC_API_KEY;
 			secretKey = process.env.HITBTC_SECRET_KEY;
 			baseURL = 'https://api.hitbtc.com/api/3/';
+		}
+
+		if (params.logger) {
+			this._logger = params.logger;
 		}
 
 		const credentials = Buffer.from(apiKey + ':' + secretKey).toString('base64');
@@ -31,9 +35,14 @@ class HitBtcApi {
 		this._symbols = {};
 		this._currencies = {};
 
-        this._hitBtcTickers = new HitBtcTickers({
-        	demo: params.demo,
-        });
+        this._hitBtcTickers = new HitBtcTickers();
+	}
+
+	setLogger(logger) {
+		this._logger = logger;
+		if (this._hitBtcTickers) {
+			this._hitBtcTickers.setLogger(logger);
+		}
 	}
 
 	log(...fArgs) {
@@ -46,7 +55,7 @@ class HitBtcApi {
 	}
 
 	async apiGet(path) {
-		this.log('Querying...', path);
+		// this.log('Querying...', path);
 
 		let resp = null;
 		try {
@@ -55,7 +64,7 @@ class HitBtcApi {
 			resp = null;
 		}
 
-		this.log('Got response', path);
+		// this.log('Got response', path);
 		return resp;
 	}
 
@@ -164,6 +173,11 @@ class HitBtcApi {
 		} catch(e) {
 			return [];
 		}
+	}
+
+	async readyAndNormalizeSymbol(symbol) {
+		await this.init();
+		return this.normalizeSymbol(symbol);
 	}
 
 	normalizeSymbol(symbol) {

@@ -1,8 +1,7 @@
 const { Program, Command } = require('lovacli');
 
 const path = require('path');
-const TradingApi = require('../classes/TradingApi.js');
-const RealMarketData = require('../classes/RealMarketData.js');
+const Market = require('../classes/Market.js');
 
 class Handler extends Command {
     setup(progCommand) {
@@ -12,15 +11,16 @@ class Handler extends Command {
     }
 
     async handle(args, options, logger) {
-        const tradingApi = new TradingApi();
-        const realMarketData = new RealMarketData();
+        let market = Market.getSingleton();
+        market.setLogger(logger);
+
 
         const symbol = args.symbol;
         const strategyName = args.strategyName;
 
-        const symbolInfo = await realMarketData.getSymbolInfo(symbol);
+        const symbolInfo = await market.getSymbolInfo(symbol);
 
-        const tradingBalance = await tradingApi.getTradingBalance();
+        const tradingBalance = await market.getTradingBalance();
         const itemCurrency = symbolInfo.baseCurrency;
         let itemBalance = 0;
         let itemReserved = 0;
@@ -36,15 +36,12 @@ class Handler extends Command {
 
         logger.info('Checking trading over '+symbolInfo.baseCurrency+' with '+symbolInfo.quoteCurrency);
 
-        const importantOrders = await tradingApi.getRecentOrdersBySymbolAndStrategyName({
+        const importantOrders = await market.getRecentOrdersBySymbolAndStrategyName({
             symbol: symbol,
             strategyName: strategyName,
             outdatedToo: true,
             notOursToo: true,
         });
-
-        console.log(importantOrders);
-        die;
 
         let toBuyOrderCount = 0;
         let toSellOrderCount = 0;
@@ -179,6 +176,8 @@ class Handler extends Command {
 
         logger.info(logPrefix, 'Items needed for sell orders: '+boughtOrdersWithNoSellOrderItemValue);
 
+
+        Market.close(); // close websockets if any
     }
 };
 

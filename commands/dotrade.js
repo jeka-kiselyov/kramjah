@@ -2,7 +2,8 @@ const { Program, Command } = require('lovacli');
 
 const path = require('path');
 const HistoricalMarket = require('../classes/HistoricalMarket.js');
-const RealMarketData = require('../classes/RealMarketData.js');
+
+const Market = require('../classes/Market.js');
 const ConsoleUI = require('../classes/ConsoleUI.js');
 
 const MarketTrader = require('../classes/MarketTrader.js');
@@ -29,17 +30,28 @@ class Handler extends Command {
                 }
             };
         }
-        // if (args.ui) await ConsoleUI.initialize();
+
+        let market = Market.getSingleton();
+        market.setLogger(logger);
 
         const symbol = args.symbol;
+
+        // try to find the setting corresponding to this symbol-strategyname
+        const config = this.program.config;
+        let traderSetting = {};
+        for (let setting of config.traders) {
+            if (setting.symbol == symbol && setting.strategyName == args.strategyName) {
+                traderSetting = setting;
+            }
+        }
 
         const marketTrader = new MarketTrader({
             symbol: symbol,
             mode: 'market',
             strategyName: args.strategyName,
             logger: logger,
+            traderSetting: traderSetting,
         });
-        const realMarketData = new RealMarketData();
 
         try {
             await marketTrader.prepareSymbolInfo(); // load symbol information from market (this api is public, no api keys needed)
@@ -53,7 +65,6 @@ class Handler extends Command {
 
         logger.info('Restoring bids data from market...');
         await marketTrader.restoreDataFromMarket();
-
 
         const currentPath = process.cwd();
         const filename = path.join(currentPath, args.filename);
@@ -97,7 +108,7 @@ class Handler extends Command {
         let price = null;
         let i = 0;
         do {
-            const ticker = await realMarketData.getTicker(symbol);
+            const ticker = await market.getTicker(symbol);
 
             if (ticker) {
                 await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(ticker);
@@ -126,12 +137,6 @@ class Handler extends Command {
 
             await new Promise((res)=>{ setTimeout(res, 10000); });
         } while(true);
-
-
-        // logger.info('Profit: '+ConsoleUI.currencyFormat(marketTrader.profitBalance));
-        // logger.info('Estimated Balance: '+ConsoleUI.currencyFormat(marketTrader.getEstimatedPortfolioPrice()));
-        // logger.info('If Would HODL: '+ConsoleUI.currencyFormat(marketTrader.getIfWouldHODLPortfolioPrice()));
-        // logger.info('Item Balance: '+ConsoleUI.itemValueFormat(marketTrader.itemBalance));
     }
 };
 

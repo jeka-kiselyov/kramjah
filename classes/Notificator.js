@@ -9,8 +9,6 @@ const fsp = require('fs').promises;
 const path = require('path');
 
 const HistoricalMarket = require('./HistoricalMarket.js');
-const RealMarketData = require('./RealMarketData.js');
-
 const MarketStatistics = require('./MarketStatistics.js');
 
 const moment = require('moment');

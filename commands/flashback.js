@@ -4,7 +4,9 @@ const path = require('path');
 const HistoricalMarket = require('../classes/HistoricalMarket.js');
 const ConsoleUI = require('../classes/ConsoleUI.js');
 
+const Market = require('../classes/Market.js');
 const MarketTrader = require('../classes/MarketTrader.js');
+const Notificator = require('../classes/Notificator.js');
 
 class Handler extends Command {
     setup(progCommand) {
@@ -94,13 +96,6 @@ class Handler extends Command {
             }
         }
 
-
-        // startTime += 200 * 60 * 60 * 1000;
-        //
-        //
-        // startTime = 1513345911000;
-        // endTime = 1513345911000 + 30*12*24*60*60*1000;
-
         if (startTime < historicalStartTime) {
             logger.info('Correcting start time');
         }
@@ -131,8 +126,6 @@ class Handler extends Command {
             }
 
             if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
-            // if (args.ui) await ConsoleUI.setBaseCurrency(marketTrader.baseCurrency);
-            // if (args.ui) await ConsoleUI.setQuoteCurrency(marketTrader.quoteCurrency);
 
             try {
                 if (args.ui) await ConsoleUI.drawTimePrice(price);
@@ -147,11 +140,14 @@ class Handler extends Command {
         } while(time <= endTime);
 
 
+        Market.close(); // close websockets if any
+
         ConsoleUI.setDataFromMarketTrader(marketTrader);
         logger.info('Profit: '+ConsoleUI.currencyFormat(marketTrader.profitBalance));
         logger.info('Estimated Balance: '+ConsoleUI.currencyFormat(marketTrader.getEstimatedPortfolioPrice()));
         logger.info('If Would HODL: '+ConsoleUI.currencyFormat(marketTrader.getIfWouldHODLPortfolioPrice()));
         logger.info('Item Balance: '+ConsoleUI.itemValueFormat(marketTrader.itemBalance));
+
     }
 };
 

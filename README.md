@@ -28,12 +28,13 @@ Run `node app.js flashback data/btcusd2021.dat Simple btcusd 1` to simulate trad
 ### Do real trading
 
 - Get your account on [HitBTC](https://hitbtc.com/).
-- Create api keys with `Order book, History, Trading balance` and `Place/cancel orders` access rights.
+- Create api keys with `Order book, History, Trading balance`, `Payment information` and `Place/cancel orders` access rights.
 - Pop it up with some usd
 - Add `.env` file to the application root with content of:
 ```
 HITBTC_API_KEY=xxxxx
 HITBTC_SECRET_KEY=yyyyyy
+HITBTC_MODE=market
 ```
 - Run `node app.js dotrade data/btcusd2021.dat Simple btcusd 1` to run trading.
 

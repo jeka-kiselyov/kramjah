@@ -5,7 +5,7 @@ class HitBtcAuthedSocket extends HitBtcSocket {
 	constructor(params = {}) {
 		super(params);
 
-		this._isDemo = params.demo;
+		this._socketAuthed = false;
 
 		this.on('opened', ()=>{
 			this.auth();
@@ -17,7 +17,7 @@ class HitBtcAuthedSocket extends HitBtcSocket {
 		let apiKey = process.env.HITBTC_DEMO_API_KEY;
 		let secretKey = process.env.HITBTC_DEMO_SECRET_KEY;
 
-		if (this._isDemo === false) {
+		if (process.env.HITBTC_MODE == 'market') {
 			apiKey = process.env.HITBTC_API_KEY;
 			secretKey = process.env.HITBTC_SECRET_KEY;
 		}
@@ -34,6 +34,8 @@ class HitBtcAuthedSocket extends HitBtcSocket {
 		if (resp === true) {
 			this.log('Authed.');
 			this.emit('authed');
+
+			this._socketAuthed = true;
 
 			return true;
 		} else {

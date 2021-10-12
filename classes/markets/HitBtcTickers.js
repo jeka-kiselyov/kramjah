@@ -1,6 +1,7 @@
 const EventEmitter = require('events');
 const HitBtcSocket = require('./HitBtcSocket.js');
 const moment = require('moment');
+require('dotenv').config();
 
 class HitBtcTickers extends EventEmitter {
 	constructor(params = {}) {
@@ -8,15 +9,19 @@ class HitBtcTickers extends EventEmitter {
 
 		let baseURL = 'wss://api.demo.hitbtc.com/api/3/ws/public';
 
-		if (params.demo === false) {
+		if (process.env.HITBTC_MODE == 'market') {
 			baseURL = 'wss://api.hitbtc.com/api/3/ws/public';
+		}
+
+		if (params.logger) {
+			this._logger = params.logger;
 		}
 
 		this._publicSocket = new HitBtcSocket({
 			url: baseURL,
 		});
-		this._publicSocket.on('data', (data)=>{
-			this.socketData(data);
+		this._publicSocket.on('json', (json)=>{
+			this.socketData(json);
 		});
 
 		this._tickers = {
@@ -28,29 +33,50 @@ class HitBtcTickers extends EventEmitter {
 		this._timeout = 5000;
 	}
 
+	setLogger(logger) {
+		this._logger = logger;
+		if (this._publicSocket) {
+			this._publicSocket.setLogger(logger);
+		}
+	}
+
 	async close() {
 		await this._publicSocket.close();
 	}
 
-	socketData(data) {
-		for (let key in this._tickers) {
-			if (data[key]) {
+	socketData(json) {
 
-				this._tickers[key] = {
-					time: moment(data[key].t).valueOf(),
-					low: parseFloat(data[key].l, 10),
-					high: parseFloat(data[key].h, 10),
-					open: parseFloat(data[key].o, 10),
-					close: parseFloat(data[key].c, 10),
-					volume: parseFloat(data[key].v, 10),
-					price: parseFloat(data[key].c, 10),
-				};
+		const pushTicker = (key, update)=>{
+			this._tickers[key] = {
+				time: moment(update.t).valueOf(),
+				low: parseFloat(update.l, 10),
+				high: parseFloat(update.h, 10),
+				open: parseFloat(update.o, 10),
+				close: parseFloat(update.c, 10),
+				volume: parseFloat(update.v, 10),
+				price: parseFloat(update.c, 10),
+			};
 
-				if (this._tickersSubscriptionsPromises[key]) {
-					this._tickersSubscriptionsPromisesResolvers[key](this._tickers[key]);
+			if (this._tickersSubscriptionsPromises[key]) {
+				this._tickersSubscriptionsPromisesResolvers[key](this._tickers[key]);
 
-					delete this._tickersSubscriptionsPromises[key];
-					delete this._tickersSubscriptionsPromisesResolvers[key];
+				delete this._tickersSubscriptionsPromises[key];
+				delete this._tickersSubscriptionsPromisesResolvers[key];
+			}
+		};
+
+		if (json && json.snapshot) {
+			for (let key in this._tickers) {
+				if (json.snapshot[key]) {
+					pushTicker(key, json.snapshot[key][0]);
+				}
+			}
+		}
+
+		if (json && json.update) {
+			for (let key in this._tickers) {
+				if (json.update[key]) {
+					pushTicker(key, json.update[key][0]);
 				}
 			}
 		}
@@ -80,7 +106,8 @@ class HitBtcTickers extends EventEmitter {
 				});
 
 			await this._publicSocket.initialize();
-			this._publicSocket.subscribeTo('ticker/3s', { "symbols": [symbol] });
+			this._publicSocket.subscribeTo('candles/M5', { "symbols": [symbol], "limit": 1 });
+			// this._publicSocket.subscribeTo('ticker/3s', { "symbols": [symbol] });
 
 			// waiting for a first ticker to be received
 			if (this._tickersSubscriptionsPromises[symbol]) {

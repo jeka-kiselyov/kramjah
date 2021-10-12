@@ -1,4 +1,5 @@
 .env
+settings/user.js
 # Logs
 logs
 *.log

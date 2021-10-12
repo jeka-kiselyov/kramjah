@@ -7,12 +7,10 @@ class MarketStatistics {
 	constructor(params = {}) {
         this._market = Market.getSingleton(false);
 
-        // this._market = new TradingApi();
-        // this._market = new RealMarketData();
-
         this._allSymbols = [];
         this._tickSizes = { /// need this to convert floats to readable numeric format
             'USD': 0.01,
+            'USDT': 0.01,
         };
         this._symbolsPrepared = false; // set after await this.prepareSymbols();
 	}
@@ -137,8 +135,8 @@ class MarketStatistics {
                             interval.openOrders.buy++;
                         }
                     } else if (order.status == 'filled') {
-                        if (!interval.mostRecentFilledDate || interval.mostRecentFilledDate < order.createdAt) {
-                            interval.mostRecentFilledDate = order.createdAt;
+                        if (!interval.mostRecentFilledDate || interval.mostRecentFilledDate < order.updatedAtDate) {
+                            interval.mostRecentFilledDate = order.updatedAtDate;
                         }
                         let amount = parseFloat(order.price) * parseFloat(order.cumQuantity);
                         if (order.side == 'sell') {

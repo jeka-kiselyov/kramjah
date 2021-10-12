@@ -2,10 +2,9 @@ const MarketTraderBidWorker = require('./MarketTraderBidWorker.js');
 const MarketClosedBid = require('./MarketClosedBid.js');
 const HistoricalMarket = require('./HistoricalMarket.js');
 
-const RealMarketData = require('./RealMarketData.js');
-const TradingApi = require('./TradingApi.js');
-
 const BaseStrategy = require('../strategies/Base.js');
+
+const Market = require('./markets/HitBtc.js');
 
 class MarketTrader {
 	constructor(params = {}) {
@@ -14,10 +13,12 @@ class MarketTrader {
 		this._bidWorkers = [];
 		this._closedBids = [];
 
-		this._originalOperatingBalance = params.operatingBalance || 2000;
+		this._originalOperatingBalance = params.operatingBalance || 1900;
 		this._operatingBalance = this._originalOperatingBalance;
 		this._profitBalance = 0;
 		this._blockedBalance = 0;
+
+		this._traderSetting = params.traderSetting || {};
 
 		this._itemBalance = 0;
 		this._itemBalanceBasedOnLastPrice = 0;
@@ -38,7 +39,7 @@ class MarketTrader {
 		}
 
 		this._symbol = params.symbol;
-		this._symbol = (''+this._symbol).toUpperCase();
+		this._symbol = (''+this._symbol).toUpperCase(); // @todo
 
 		// this._baseCurrency = 'BTC'; // Name (code) of base currency
 		// this._quoteCurrency = 'USD';
@@ -49,10 +50,7 @@ class MarketTrader {
 
 		this._mode = params.mode || 'simulation'; // 'simulation' or 'market';
 
-		this._tradingApi = null;
-		if (this._mode == 'market') {
-			this._tradingApi = new TradingApi();
-		}
+		this._market = Market.getSingleton(false);
 
 		this._symbolInfoPrepared = false;
 	}
@@ -75,6 +73,10 @@ class MarketTrader {
 		return this._strategyName;
 	}
 
+	get traderSetting() {
+		return this._traderSetting;
+	}
+
 	get baseCurrency() {
 		return this._baseCurrency;
 	}
@@ -94,8 +96,12 @@ class MarketTrader {
 
 		this.log('Getting symbol info: '+this._symbol);
 
-		const realMarket = new RealMarketData();
-		const symbolInfo = await realMarket.getSymbolInfo(this._symbol);
+		this._symbol = await this._market.readyAndNormalizeSymbol(this._symbol);
+		if (!this._symbol) {
+			throw new Error('Invalid symbol '+this._symbol);
+		}
+
+		const symbolInfo = await this._market.getSymbolInfo(this._symbol);
 
 		if (symbolInfo.id !== this._symbol) {
 			throw new Error('Invalid symbol '+this._symbol);
@@ -322,7 +328,7 @@ class MarketTrader {
 			tickSize: this._tickSize,
 
 			makerFeePercents: this._makerFeePercents,
-			tradingApi: this._tradingApi, // we are passing null here if we are in simulation mode
+			tradingApi: this._market, // we are passing null here if we are in simulation mode
 		});
 
 		bidWorker._waitingForPrice = price;
@@ -346,9 +352,9 @@ class MarketTrader {
 		// console.error('workOnBalance', workOnBalance);
 
 		if (workOnBalance < minBid || workOnBalance > this._operatingBalance || workOnBalance > availableCurrency) {
-			// console.log('can not create', this._symbol, workOnBalance < minBid, workOnBalance > this._operatingBalance, workOnBalance > availableCurrency);
-			// console.log(workOnBalance, availableCurrency);
-			// console.log(workOnBalance, this._operatingBalance);
+			console.log('can not create', this._symbol, workOnBalance < minBid, workOnBalance > this._operatingBalance, workOnBalance > availableCurrency);
+			console.log(workOnBalance, availableCurrency);
+			console.log(workOnBalance, this._operatingBalance);
 			return false;
 		}
 
@@ -359,7 +365,7 @@ class MarketTrader {
 			tickSize: this._tickSize,
 
 			makerFeePercents: this._makerFeePercents,
-			tradingApi: this._tradingApi, // we are passing null here if we are in simulation mode
+			tradingApi: this._market, // we are passing null here if we are in simulation mode
 		});
 
 		bidWorker.setOperatingBalance(workOnBalance);
@@ -407,92 +413,45 @@ class MarketTrader {
 	 */
 	async restoreDataFromMarket() {
 		await this.prepareSymbolInfo();
+		// market class should be ready and synced here already
 
 		try {
-
-			let activeOrders = await this._tradingApi.getActiveOrders({
+			const orders = await this._market.getRecentOrdersBySymbolAndStrategyName({
 				symbol: this._symbol,
-			});
-			let historyOrders = await this._tradingApi.getHistoryOrders({
-				symbol: this._symbol,
+				strategyName: this._strategyName,
+				outdatedToo: true,
 			});
 
 
-			let lastCount = historyOrders.length;
-			let offset = 1000;
-			while (lastCount >= 1000) { // if count = limit, ask for more
-				const moreItems = await this._tradingApi.getHistoryOrders({
-					symbol: this._symbol,
-					offset: offset,
-				});
-
-				historyOrders = historyOrders.concat(moreItems);
-				lastCount = moreItems.length;
-				offset += 1000;
-			}
-
-			let byOriginalPriceGroup = {
-
-			};
-
-			let mostRecentCreatedOrderDate = new Date(0);
-
-			let orderToPriceGroup = (order)=>{
-
-				order.createdAt = new Date(order.createdAt);
-				order.updatedAt = new Date(order.updatedAt);
-
-				// order.createdAt.setTime(order.createdAt.getTime() + Math.random()*1000)
-				let clientOrderId = order.clientOrderId;
-				if (clientOrderId.indexOf('_') != -1 && order.symbol == this._symbol) { // made by us
-					let clientOrderIdItems = clientOrderId.split('_');
-
-					let originalPrice = parseFloat(clientOrderIdItems[0], 10);
-					let strategyName = clientOrderIdItems[1];
-
-					// we process only orders placed on same trading pair by same strategy name
-					if (strategyName == this._strategyName) {
-						if (order.createdAt > mostRecentCreatedOrderDate) {
-							mostRecentCreatedOrderDate = order.createdAt;
-						}
-
-						if (!byOriginalPriceGroup[''+originalPrice]) {
-							byOriginalPriceGroup[''+originalPrice] = [];
-						}
-
-						byOriginalPriceGroup[''+originalPrice].push(order);
-					} else {
-					}
+			let mostRecentCreatedOrderDate = new Date(0); // date of most recent created order
+			for (let mostRecentOrder of orders) {
+				if (mostRecentOrder.createdAtDate > mostRecentCreatedOrderDate) {
+					mostRecentCreatedOrderDate = mostRecentOrder.createdAtDate;
 				}
 			}
 
-			for (let order of activeOrders) {
-				orderToPriceGroup(order);
-			}
-			for (let order of historyOrders) {
-				orderToPriceGroup(order);
-			}
+			for (let mostRecentOrder of orders) {
+				let originalPriceValue = mostRecentOrder.originalPrice; // the last order in price group
+				let prevOrder = null;	// second after it (if any)
 
-			for (let originalPriceKey in byOriginalPriceGroup) {
-				let originalPriceValue = parseFloat(originalPriceKey, 10);
-				let orders = byOriginalPriceGroup[originalPriceKey];
+				if (mostRecentOrder.previousOrders && mostRecentOrder.previousOrders.length) {
+					prevOrder = mostRecentOrder.previousOrders[0];
+				}
 
-			    orders.sort(function(a, b) { return b.createdAt - a.createdAt; }); /// sort DESC by createdAt
+				let bidWorker = null;
 
-			    // this.log('There re '+orders.length+' orders on market in price of '+originalPriceValue);
-
-			    let mostRecentOrder = orders[0];
+				// console.log('On market', originalPriceValue, mostRecentOrder.status, prevOrder ? prevOrder.status : 'no');
 
 			    if (mostRecentOrder.status == 'filled' && mostRecentOrder.side == 'buy') {
-			    	if (mostRecentOrder.updatedAt > mostRecentCreatedOrderDate) { // order was bought while we we offline
+			    	if (mostRecentOrder.updatedAtDate > mostRecentCreatedOrderDate) { // order was bought while we we offline
 				    	// most recent was bought while we were offline
-				    	this.log('There is filled buy order on price of '+originalPriceKey+' adding to be sold order over it');
+				    	this.log('There is filled buy order on price of '+originalPriceValue+' adding to be sold order over it');
 
 				    	this._mode = 'simulation';
 				    	// console.log(mostRecentOrder);
 				    	// console.log(mostRecentOrder.price);
 				    	// console.log(mostRecentOrder.clientOrderId);
-				    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
+				    	bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
 				    	bidWorker._gonnaBuy = parseFloat(mostRecentOrder.cumQuantity, 10);
 
 				    	this._mode = 'market';
@@ -500,11 +459,11 @@ class MarketTrader {
 
 				    	await bidWorker.wasBought(mostRecentOrder);
 
-				    	if (orders.length > 1) {
-				    		for (let i = 1; i < orders.length; i++) {
-				    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
-				    		}
-				    	}
+				    	// if (mostRecentOrder.previousOrders.length > 0) {
+				    	// 	for (let i = 0; i < mostRecentOrder.previousOrders.length; i++) {
+				    	// 		bidWorker.appendHistoryClosedBidOrder(mostRecentOrder.previousOrders[i]);
+				    	// 	}
+				    	// }
 				    } else {
 				    	this.log('Bought long time ago, we are ignoring them');
 				    }
@@ -513,14 +472,9 @@ class MarketTrader {
 				    	this.log('Sold while we were offline');
 
 				    	try {
-					    	let prevOrder = null;
-					    	if (orders[1] && orders[1].side == 'buy' && orders[1].status == 'filled') {
-					    		prevOrder = orders[1];
-					    	}
-
 					    	if (prevOrder) {
 						    	this._mode = 'simulation';
-						    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
+						    	bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
 						    	bidWorker._gonnaBuy = parseFloat(prevOrder.cumQuantity, 10);
 						    	await bidWorker.wasBought(prevOrder);
 
@@ -529,37 +483,38 @@ class MarketTrader {
 						    	this._mode = 'market';
 						    	await bidWorker.wasSold(mostRecentOrder);
 
-						    	if (orders.length > 2) {
-						    		for (let i = 2; i < orders.length; i++) {
-						    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
-						    		}
-						    	}
+						    	// if (mostRecentOrder.previousOrders.length > 1) {
+						    	// 	for (let i = 1; i < mostRecentOrder.previousOrders.length; i++) {
+						    	// 		bidWorker.appendHistoryClosedBidOrder(mostRecentOrder.previousOrders[i]);
+						    	// 	}
+						    	// }
 					    	}
 				    	} catch(e) {
 				    		console.error(e);
 				    	}
 			    	} else {
-				    	this.log('Sold long time ago, we are ignoring them');
+				    	//this.log('Sold long time ago, we are ignoring them');
 				    	// console.log(mostRecentOrder.updatedAt, mostRecentCreatedOrderDate)
 				    	//
 				    	this._mode = 'simulation';
-				    	let bidWorker = await this.addArchivedWorkerWaitingForBuyAt(originalPriceValue);
+				    	bidWorker = await this.addArchivedWorkerWaitingForBuyAt(originalPriceValue);
 				    	bidWorker._isArchived = true;
 
-			    		for (let i = 0; i < orders.length; i++) {
-			    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
-			    		}
+		    			// bidWorker.appendHistoryClosedBidOrder(mostRecentOrder);
+			    		// for (let i = 0; i < mostRecentOrder.previousOrders.length; i++) {
+			    		// 	bidWorker.appendHistoryClosedBidOrder(mostRecentOrder.previousOrders[i]);
+			    		// }
 
-			    		console.log('had profit of', bidWorker.getHistoricalProfit());
+			    		// console.log('had profit of', bidWorker.getHistoricalProfit());
 
 				    	this._mode = 'market';
 			    	}
 			    } else if (mostRecentOrder.status == 'partiallyFilled' || mostRecentOrder.status == 'new') {
 			    	// order is active actually
-			    	this.log('There is pending order on price of '+originalPriceKey+' side: '+mostRecentOrder.side);
+			    	//this.log('There is pending order on price of '+originalPriceValue+' side: '+mostRecentOrder.side);
 
 			    	this._mode = 'simulation';
-			    	let bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
+			    	bidWorker = await this.addBidWorkerWaitingForBuyAt(originalPriceValue);
 
 			    	if (mostRecentOrder.side == 'sell' && bidWorker) {
 			    		let resellAtPrice = parseFloat(mostRecentOrder.price, 10);
@@ -572,27 +527,36 @@ class MarketTrader {
 
 			    	this._mode = 'market';
 
-			    	if (orders.length > 1) {
-			    		for (let i = 1; i < orders.length; i++) {
-			    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
-			    		}
-			    	}
+			    	// if (mostRecentOrder.previousOrders.length > 0) {
+			    	// 	for (let i = 0; i < mostRecentOrder.previousOrders.length; i++) {
+			    	// 		bidWorker.appendHistoryClosedBidOrder(mostRecentOrder.previousOrders[i]);
+			    	// 	}
+			    	// }
 			    } else {
-			    	this.log('They are cancelled probably');
+			    	//this.log('They are cancelled probably');
 
 			    	this._mode = 'simulation';
-			    	let bidWorker = await this.addArchivedWorkerWaitingForBuyAt(originalPriceValue);
+			    	bidWorker = await this.addArchivedWorkerWaitingForBuyAt(originalPriceValue);
 			    	bidWorker._isArchived = true;
 
-		    		for (let i = 0; i < orders.length; i++) {
-		    			bidWorker.appendHistoryClosedBidOrder(orders[i]);
-		    		}
+	    			// bidWorker.appendHistoryClosedBidOrder(mostRecentOrder);
+		    		// for (let i = 0; i < mostRecentOrder.previousOrders.length; i++) {
+		    		// 	bidWorker.appendHistoryClosedBidOrder(mostRecentOrder.previousOrders[i]);
+		    		// }
 			    	this._mode = 'market';
+			    }
+
+
+			    if (bidWorker) {
+	    			bidWorker.appendHistoryClosedBidOrder(mostRecentOrder);
+		    		for (let i = 0; i < mostRecentOrder.previousOrders.length; i++) {
+		    			bidWorker.appendHistoryClosedBidOrder(mostRecentOrder.previousOrders[i]);
+		    		}
 			    }
 			}
 
 
-	        let tb = await this._tradingApi.getTradingBalance();
+	        let tb = await this._market.getTradingBalance();
 	        for (let tbItem of tb) {
 	        	if (tbItem.currency == this._quoteCurrency) {
 	        		this._operatingBalance = await this._strategy.getMaxOperatingBalance(parseFloat(tbItem.available, 10));
@@ -625,9 +589,15 @@ class MarketTrader {
 			this._originalOperatingBalance = this.getEstimatedPortfolioPrice();
 		}
 
+		let c = 0;
+		let hasLastOrderId = 0;
 		for (let bidWorker of this._bidWorkers) {
 			await bidWorker.processNewCombinedPrice(priceCombined);
+			c++;
 
+			if (bidWorker._lastOrderClientOrderId) {
+				hasLastOrderId++;
+			}
 			// if (bidWorker.isWaitingForBuyLowerThan(priceCombined.low * 0.7)) {
 			// 	/// close bids if they are waiting to buy with too low price
 			// 	await this.archiveWaitingForBuyBidWorker(bidWorker);
@@ -640,6 +610,8 @@ class MarketTrader {
 			// 	}
 			// }
 		}
+
+		this.log('Checked '+c+' items, with id: '+hasLastOrderId);
 
 		await this._strategy.processNewCombinedPrice();
 

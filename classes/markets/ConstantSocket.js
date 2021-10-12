@@ -15,6 +15,13 @@ class ConstantSocket extends EventEmitter {
 		this._url = params.url;;
 	}
 
+	setLogger(logger) {
+		this._logger = logger;
+		if (this._publicSocket) {
+			this._publicSocket.setLogger(logger);
+		}
+	}
+
 	flushProperties() {
 		this._lastCommandId = 0;
 		this._ws = null;
@@ -55,7 +62,7 @@ class ConstantSocket extends EventEmitter {
 
 	async processNotification(json) {
 		let notificationDescription = (json && json.method) ? json.method : '';
-		this.log('Got notification', notificationDescription);
+		// this.log('Got notification', notificationDescription);
 
 		this.emit('notification', json);
 	}
@@ -104,6 +111,9 @@ class ConstantSocket extends EventEmitter {
 
 			}
 			if (json.id && this._commandsAwaitors[json.id]) {
+				if (json.error) {
+					this.log('Got error', json.error);
+				}
 				this._commandsAwaitors[json.id].promiseResolver(json.result);
 			} else {
 				this.processNotification(json);
@@ -123,7 +133,7 @@ class ConstantSocket extends EventEmitter {
 		this._ws.on('ping', ()=>{
 				this._mostRecentMessageReceivedDate = new Date();
 				this.heartBeat();
-				this.log('got ping');
+				// this.log('got ping');
 			});
 
 		// await for initializtion
@@ -201,6 +211,20 @@ class ConstantSocket extends EventEmitter {
 		const tookTime = ((new Date()).getTime()) - sentAt;
 
 		this.log('Got response for: ', requestDescription, 'Took '+tookTime+'ms');
+
+		if (requestDescription.indexOf('new_order') != -1) {
+			console.log('!');
+			console.log('!');
+			console.log('!');
+			console.log('!');
+			console.log('!');
+			console.log('!');
+			console.log('!');
+			console.log('!');
+			console.log('!');
+			console.log(results);
+			// this.log(results);
+		}
 
 		return results;
 	}

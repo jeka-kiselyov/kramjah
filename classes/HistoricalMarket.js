@@ -5,8 +5,7 @@ const fsp = require('fs').promises;
 const Pack = require('./Pack.js');
 
 const debug = require('./Debug.js')('HistoricalMarket');
-
-const RealMarketData = require('../classes/RealMarketData.js');
+const Market = require('./markets/HitBtc.js');
 
 const RAWINTERVALS = [
 	5 * 60 * 1000,
@@ -501,7 +500,8 @@ class HistoricalMarket extends IndexedCSV {
 	 * @return {[type]} [description]
 	 */
 	async fulfilTillNow(symbol) {
-        let realMarketData = new RealMarketData();
+		const maxThreads = 8;
+        let market = Market.getSingleton();
 
         let toTime = (new Date()).getTime();
         let fromTime = this.getEndTime();
@@ -509,16 +509,31 @@ class HistoricalMarket extends IndexedCSV {
         fromTime  -= 8*24*60*60*1000; // move for one top level interval to the past to be sure we cover gaps
 
         while (fromTime < toTime) {
-            let getTo = fromTime + 24 * 60 * 60 * 1000;
-            let data = await realMarketData.getM5Candles(symbol, fromTime, getTo);
+            // let getTo = fromTime + 24 * 60 * 60 * 1000;
+            const promises = [];
+
+            const items = [];
+            const theLoop = async(fromTime)=>{
+            	const getTo = fromTime + 24 * 60 * 60 * 1000;
+            	const data = await market.getM5Candles(symbol, fromTime, getTo);
+            	Array.prototype.push.apply(items, data); // faster then .concat
+            };
+
+            for (let i = 0; i < maxThreads; i++) {
+            	if (fromTime < toTime) {
+            		promises.push(theLoop(fromTime));
+		            fromTime += 24 * 60 * 60 * 1000;
+            	}
+            }
+
+            await Promise.all(promises);
 
             let addedPricePoints = 0;
-            for (let item of data) {
+            for (let item of items) {
                 await this.pushLowestCombinedIntervalRAWAndRecalculateParents(item);
                 addedPricePoints++;
             }
             await new Promise((res)=>{ setTimeout(res, 100); }); // to be sure we are safe in limits
-            fromTime += 24 * 60 * 60 * 1000;
         }
 
         return true;
