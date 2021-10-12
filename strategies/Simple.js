@@ -66,14 +66,13 @@ class Strategy extends Base {
 		const marketTrader = this.getMarketTrader();          // MarketTrader instance
 
 		// should be dividable by quantityIncrement
-		if (marketTrader.symbol == 'ETHUSD' || marketTrader.symbol == 'ETHUSDT') {
-			return 0.01;
-		}
-		if (marketTrader.symbol == 'ETHBTC') {
-			return (maxBid / 100);
-		}
+        let minimumProfit = this.getTraderSetting('minimumProfit', 0);
 
-		return (maxBid / 50);
+        if (minimumProfit > 0) {
+        	return minimumProfit;
+        } else {
+			return (maxBid / 50); // default is 2%
+        }
 	}
 
 	/**
