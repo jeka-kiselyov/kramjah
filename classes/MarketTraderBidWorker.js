@@ -13,7 +13,7 @@ class MarketTraderBidWorker extends EventEmitter {
 
 		this._makerFeePercents = params.makerFeePercents;
 
-		this._tradingApi = params.tradingApi;
+		this._market = params.tradingApi;
 
 		this._isArchived = false; // traded, not needed anymore
 		this._waitingForBuy = false;
@@ -87,7 +87,7 @@ class MarketTraderBidWorker extends EventEmitter {
 		this._isArchived = true;
 
 		if (this._lastOrderClientOrderId) {
-			await this._tradingApi.cancelOrder({
+			await this._market.cancelOrder({
 					clientOrderId: this._lastOrderClientOrderId,
 				});
 			this._lastOrderClientOrderId = true;
@@ -137,6 +137,8 @@ class MarketTraderBidWorker extends EventEmitter {
 
 	generateClientOrderId() {
 		let priceAsString = this._originalTargetPrice.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
+		priceAsString = priceAsString.split('.').join('-'); // hitbtc api v3 doesn not support dots in clientOrderId
+
 		// return (''+this._originalTargetPrice+'_'+this._marketTrader.getClientOrderIdSuffix()+'_'+(new Date).getTime());
 		return (''+priceAsString+'_'+this._marketTrader.getClientOrderIdSuffix()+'_'+((''+Math.random()).substring(2,8)));
 	}
@@ -191,7 +193,7 @@ class MarketTraderBidWorker extends EventEmitter {
 
 			this._gonnaBuy = parseFloat(quantityToApi, 10); // just double check value is correct
 
-			await this._tradingApi.placeBuyOrder({
+			await this._market.placeBuyOrder({
 				clientOrderId: this._lastOrderClientOrderId,
 				symbol: this.symbol,
 				quantity: quantityToApi,
@@ -252,7 +254,7 @@ class MarketTraderBidWorker extends EventEmitter {
 			let priceToApi = this._waitingForPrice.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
 
 
-			await this._tradingApi.placeSellOrder({
+			await this._market.placeSellOrder({
 				clientOrderId: this._lastOrderClientOrderId,
 				symbol: this.symbol,
 				quantity: quantityToApi,
@@ -272,7 +274,7 @@ class MarketTraderBidWorker extends EventEmitter {
 			let amountToApi = quantityToTakeOut.toFixed(Math.ceil(Math.abs(Math.log10(this._quantityIncrement))));
 
 			// @todo: check if successful
-			let success = await this._tradingApi.transferFromTradingBalance({
+			let success = await this._market.transferFromTradingBalance({
 				amount: amountToApi,
 				currency: this._marketTrader._baseCurrency,
 			});
@@ -295,7 +297,7 @@ class MarketTraderBidWorker extends EventEmitter {
 			let amountToApi = value.toFixed(Math.ceil(Math.abs(Math.log10(this._tickSize))));
 
 			// @todo: check if successful
-			let success = await this._tradingApi.transferFromTradingBalance({
+			let success = await this._market.transferFromTradingBalance({
 				amount: amountToApi,
 				currency: this._marketTrader._quoteCurrency,
 			});
@@ -425,7 +427,7 @@ class MarketTraderBidWorker extends EventEmitter {
 		let orderOnMarket = null;
 
 		try {
-			orderOnMarket = await this._tradingApi.getOrderByClientOrderIdWithCache({
+			orderOnMarket = await this._market.getOrderByClientOrderIdWithCache({
 				symbol: this.symbol,
 				clientOrderId: this._lastOrderClientOrderId,
 			});
@@ -435,7 +437,7 @@ class MarketTraderBidWorker extends EventEmitter {
 		// console.log(orderOnMarket.status);
 
 		if (!orderOnMarket) {
-			// console.error('Can not find order on market', this._lastOrderClientOrderId);
+			console.error('Can not find order on market', this._lastOrderClientOrderId);
 
 			return false;
 		}
@@ -502,6 +504,8 @@ class MarketTraderBidWorker extends EventEmitter {
 			return false;
 		}
 
+		// console.log(marketOrder.side, marketOrder.updatedAtDate);
+
 		const price = parseFloat(marketOrder.price, 10);
 		const amount = parseFloat(marketOrder.quantity, 10);
 
@@ -527,6 +531,8 @@ class MarketTraderBidWorker extends EventEmitter {
 
 				// console.log('profit', profit, thisTotal, soldTotal, amount);
 				this._closedBids[0]._profit = profit;
+			} else {
+				// console.log('error calculating profit', this._closedBids.length);
 			}
 		}
 

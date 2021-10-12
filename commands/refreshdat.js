@@ -1,8 +1,8 @@
 const { Program, Command } = require('lovacli');
 
 const path = require('path');
+const Market = require('../classes/Market.js');
 const HistoricalMarket = require('../classes/HistoricalMarket.js');
-const RealMarketData = require('../classes/RealMarketData.js');
 
 class Handler extends Command {
     setup(progCommand) {
@@ -57,6 +57,8 @@ class Handler extends Command {
                 fullIntervals++;
             }
         }
+
+        await Market.close(); // close websockets if any
 
         if (thereIsNotFull > 1) {
         } else {

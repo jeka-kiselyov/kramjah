@@ -1,17 +1,16 @@
-const RealMarketData = require('./RealMarketData.js');
-const TradingApi = require('../classes/TradingApi.js');
+const Market = require('./markets/HitBtc.js');
 
 
-// @todo: cache this._tradingApi.getAccountBalance(); and this._tradingApi.getTradingBalance();
+// @todo: cache this._market.getAccountBalance(); and this._market.getTradingBalance();
 
 class MarketStatistics {
 	constructor(params = {}) {
-        this._tradingApi = new TradingApi();
-        this._realMarketData = new RealMarketData();
+        this._market = Market.getSingleton(false);
 
         this._allSymbols = [];
         this._tickSizes = { /// need this to convert floats to readable numeric format
             'USD': 0.01,
+            'USDT': 0.01,
         };
         this._symbolsPrepared = false; // set after await this.prepareSymbols();
 	}
@@ -29,7 +28,7 @@ class MarketStatistics {
         const symbol = marketTrader._symbol;
         const strategyName = marketTrader._strategyName;
 
-        const ticker = await this._realMarketData.getTicker(symbol);
+        const ticker = await this._market.getTicker(symbol);
         const currentPrice = ticker.low;
 
         let quoteCurrency = null;
@@ -48,7 +47,7 @@ class MarketStatistics {
             throw new Error('Can not get symbol info from market');
         }
 
-        const importantOrders = await this._tradingApi.getRecentOrdersBySymbolAndStrategyName({
+        const importantOrders = await this._market.getRecentOrdersBySymbolAndStrategyName({
             symbol: symbol,
             strategyName: strategyName,
             outdatedToo: true,
@@ -136,8 +135,8 @@ class MarketStatistics {
                             interval.openOrders.buy++;
                         }
                     } else if (order.status == 'filled') {
-                        if (!interval.mostRecentFilledDate || interval.mostRecentFilledDate < order.createdAt) {
-                            interval.mostRecentFilledDate = order.createdAt;
+                        if (!interval.mostRecentFilledDate || interval.mostRecentFilledDate < order.updatedAtDate) {
+                            interval.mostRecentFilledDate = order.updatedAtDate;
                         }
                         let amount = parseFloat(order.price) * parseFloat(order.cumQuantity);
                         if (order.side == 'sell') {
@@ -232,8 +231,8 @@ class MarketStatistics {
 
         const ret = {};
 
-        const mainBalance = await  this._tradingApi.getAccountBalance();
-        const tradingBalance = await  this._tradingApi.getTradingBalance();
+        const mainBalance = await  this._market.getAccountBalance();
+        const tradingBalance = await  this._market.getTradingBalance();
         for (let mainBalanceItem of mainBalance) {
             for (let tradingBalanceItem of tradingBalance) {
                 if (mainBalanceItem.currency == tradingBalanceItem.currency) {
@@ -290,8 +289,8 @@ class MarketStatistics {
     async getEstimatedAccountBalance() {
         await this.prepareSymbols();
 
-        const mainBalance = await this._tradingApi.getAccountBalance();
-        const tradingBalance = await this._tradingApi.getTradingBalance();
+        const mainBalance = await this._market.getAccountBalance();
+        const tradingBalance = await this._market.getTradingBalance();
 
         const ret = {
             BTC: {
@@ -331,6 +330,8 @@ class MarketStatistics {
                     } else if (tradingBalanceItem.currency === 'BTC') {
                         balanceBTC = itemValue;
                         estimatedBTC += balanceBTC;
+                    } else if (tradingBalanceItem.currency === 'USDT') {
+                        // ignore it as it's the copy of USD
                     } else {
                         let totalItem = itemValue;
                         let toTransform = {
@@ -341,7 +342,7 @@ class MarketStatistics {
                         };
 
                         for (let symbolInfo of this._allSymbols) {
-                            if (symbolInfo.quoteCurrency == 'USD' && symbolInfo.baseCurrency == tradingBalanceItem.currency) {
+                            if ((symbolInfo.quoteCurrency == 'USD' || symbolInfo.quoteCurrency == 'USDT') && symbolInfo.baseCurrency == tradingBalanceItem.currency) {
                                 toTransform.usdPair = symbolInfo.id.toUpperCase();
                                 neededPairs.push(toTransform.usdPair);
                             }
@@ -360,16 +361,17 @@ class MarketStatistics {
                 neededPairs.push('BTCUSD');
 
                 /// need to get all symbols as some of them may have special symbol name
-                let tickers = await this._realMarketData.getTickers(neededPairs);
+                let tickers = await this._market.getTickers(neededPairs);
+
                 for (let symbol in tickers) {
                     let ticker = tickers[symbol];
 
                     for (let neededPair of toTransformItems) {
                         if (neededPair.usdPair == symbol) {
-                            estimatedUSD += (neededPair.value * ticker.low);
+                            estimatedUSD += (neededPair.value * ticker.price);
                         }
                         if (neededPair.btcPair == symbol) {
-                            estimatedBTC += (neededPair.value * ticker.low);
+                            estimatedBTC += (neededPair.value * ticker.price);
                         }
                     }
                 }
@@ -377,10 +379,10 @@ class MarketStatistics {
                 /// and transform BTC and USD to eachother
                 let ticker = tickers['BTCUSD'];
 
-                estimatedUSD += (balanceBTC * ticker.low);
-                estimatedBTC += (balanceUSD / ticker.low);
+                estimatedUSD += (balanceBTC * ticker.price);
+                estimatedBTC += (balanceUSD / ticker.price);
 
-                btcPrice = ticker.low;
+                btcPrice = ticker.price;
             }
 
             ret.BTC.total = estimatedBTC;
@@ -406,7 +408,7 @@ class MarketStatistics {
             return true;
         }
 
-        this._allSymbols = await this._realMarketData.getAllSymbols();
+        this._allSymbols = await this._market.getAllSymbols();
         for (let symbolInfo of this._allSymbols) {
             if (!this._tickSizes[symbolInfo.quoteCurrency]) {
                 this._tickSizes[symbolInfo.quoteCurrency] = symbolInfo.tickSize;
@@ -431,6 +433,162 @@ class MarketStatistics {
         }
 
         return price;
+    }
+
+
+    async evaluateSymbol(symbol) {
+        const expectedPercentGrowth = 2.5;
+        const pricesBidIntervalPercents = 0.09;
+
+        const symbolInfo = await this._market.getSymbolInfo(symbol);
+
+        let toTime = (new Date()).getTime();
+        let fromTime = (new Date()).getTime();
+
+        fromTime  -= 7*24*60*60*1000; // move for one top level interval to the past to be sure we cover gaps
+
+        let priceOnStart = null;
+        let priceOnEnd = null;
+        let volatilities = [];
+
+        let maxVolatility = 0;
+        let minVolatility = Infinity;
+
+        let pricesToSold = [];
+        let pricesToSoldCovered = 0;
+
+        let pricesToSoldInInterval = [];
+        let pricesToSoldInIntervalCovered = 0;
+
+        let volumes = [];
+
+        while (fromTime < toTime) {
+            let getTo = fromTime + 24 * 60 * 60 * 1000;
+            let data = await this._market.getM5Candles(symbol, fromTime, getTo);
+
+            data.sort(function(a, b) {
+                return a.time - b.time;
+            });
+
+            let addedPricePoints = 0;
+            for (let item of data) {
+                if (priceOnStart === null) priceOnStart = (item.low + item.high) / 2;
+                priceOnEnd = (item.low + item.high) / 2;
+
+                let volatility = (Math.max(item.high, item.open, item.close) - Math.min(item.low, item.open, item.close)) / priceOnEnd;
+
+                if (volatility > maxVolatility) maxVolatility = volatility;
+                if (volatility < minVolatility) minVolatility = volatility;
+
+                volatilities.push(volatility);
+
+                volumes.push(item.volumeQuote);
+
+                for (let i = 0; i < pricesToSold.length; i++) {
+                    let priceToSold = pricesToSold[i];
+
+                    if (priceOnEnd >= priceToSold) {
+                        // covered
+                        //
+                        pricesToSold.splice(i, 1); i--;
+                        pricesToSoldCovered++;
+                    }
+                }
+
+                for (let i = 0; i < pricesToSoldInInterval.length; i++) {
+                    let priceToSold = pricesToSoldInInterval[i];
+
+                    if (priceOnEnd >= priceToSold) {
+                        // covered
+                        //
+                        pricesToSoldInInterval.splice(i, 1); i--;
+                        pricesToSoldInIntervalCovered++;
+                    }
+                }
+
+                pricesToSold.push(priceOnEnd * ((100+expectedPercentGrowth)/100) );
+
+                let foundInInterval = false;
+                let thisToBeSoldAt = priceOnEnd * ((100+expectedPercentGrowth)/100);
+                for (let priceToSoldInInterval of pricesToSoldInInterval) {
+                    // let toSoldAt = priceToSoldInInterval * ((100+expectedPercentGrowth)/100);
+                    if (thisToBeSoldAt >= (priceToSoldInInterval * (100-pricesBidIntervalPercents)/100) && thisToBeSoldAt <= (priceToSoldInInterval * (100+pricesBidIntervalPercents)/100)) {
+                        foundInInterval = true;
+                    }
+                }
+
+                if (!foundInInterval) {
+                    pricesToSoldInInterval.push(thisToBeSoldAt);
+                }
+            }
+
+            await new Promise((res)=>{ setTimeout(res, 500); });
+            fromTime += 24 * 60 * 60 * 1000;
+        }
+
+        let sumVolatility = volatilities.reduce((a, b) => a + b, 0);
+        let avgVolatility = (sumVolatility / volatilities.length) || 0;
+
+        const asc = arr => arr.sort((a, b) => a - b);
+
+        const sum = arr => arr.reduce((a, b) => a + b, 0);
+
+        const mean = arr => sum(arr) / arr.length;
+        // sample standard deviation
+        const std = (arr) => {
+            const mu = mean(arr);
+            const diffArr = arr.map(a => (a - mu) ** 2);
+            return Math.sqrt(sum(diffArr) / (arr.length - 1));
+        };
+
+        const quantile = (arr, q) => {
+            const sorted = asc(arr);
+            const pos = (sorted.length - 1) * q;
+            const base = Math.floor(pos);
+            const rest = pos - base;
+            if (sorted[base + 1] !== undefined) {
+                return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+            } else {
+                return sorted[base];
+            }
+        };
+
+        let medianVolume = quantile(volumes, .50);
+        let totalVolume = sum(volumes);
+
+        let medianVolatility = quantile(volatilities, .50);
+        let q25Volatility = quantile(volatilities, .25);
+        let q75Volatility = quantile(volatilities, .75);
+
+        let diff = (priceOnEnd - priceOnStart) / priceOnStart;
+
+        let pricesToSoldOpen = pricesToSold.length;
+        let pricesToSoldCoveredPercent = 1 - ( pricesToSoldOpen ? (pricesToSoldOpen / (pricesToSoldOpen + pricesToSoldCovered)) : 0 );
+        let pricesToSoldInIntervalOpen = pricesToSoldInInterval.length;
+        let pricesToSoldInIntervalCoveredPercent = 1 - ( pricesToSoldInIntervalOpen ? (pricesToSoldInIntervalOpen / (pricesToSoldInIntervalOpen + pricesToSoldInIntervalCovered)) : 0 );
+
+        return {
+            symbol: symbolInfo.id,
+            baseCurrency: symbolInfo.baseCurrency,
+            quoteCurrency: symbolInfo.quoteCurrency,
+            priceOnStart: priceOnStart,
+            priceOnEnd: priceOnEnd,
+            medianVolume: medianVolume,
+            totalVolume: totalVolume,
+            pricesToSoldCovered: pricesToSoldCovered,
+            pricesToSoldOpen: pricesToSoldOpen,
+            pricesToSoldCoveredPercent: parseFloat((pricesToSoldCoveredPercent*100).toFixed(3)),
+            pricesToSoldInIntervalCovered: pricesToSoldInIntervalCovered,
+            pricesToSoldInIntervalOpen: pricesToSoldInIntervalOpen,
+            pricesToSoldInIntervalCoveredPercent: parseFloat((pricesToSoldInIntervalCoveredPercent*100).toFixed(3)),
+            diff: parseFloat((diff*100).toFixed(3)),
+            minVolatility: parseFloat((minVolatility*100).toFixed(3)),
+            avgVolatility: parseFloat((avgVolatility*100).toFixed(3)),
+            maxVolatility: parseFloat((maxVolatility*100).toFixed(3)),
+            q25Volatility: parseFloat((q25Volatility*100).toFixed(3)),
+            medianVolatility: parseFloat((medianVolatility*100).toFixed(3)),
+            q75Volatility: parseFloat((q75Volatility*100).toFixed(3)),
+        };
     }
 };
 

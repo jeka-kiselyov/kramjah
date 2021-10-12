@@ -5,7 +5,6 @@ class Strategy extends Base {
 		super(params);
 	}
 
-
 	/**
 	 * Take out portion of coin before selling bid back at higher price
 	 * Useful if you want to accumulate some coin
@@ -20,15 +19,41 @@ class Strategy extends Base {
 	 * @return {[type]} [description]
 	 */
 	async getTakeOutQuantityBeforeSell() {
-		const marketTrader = this.getMarketTrader();          // MarketTrader instance
-		const quantityIncrement = marketTrader._quantityIncrement;
+		return this.getTraderSetting('takeOutQuantity', 0);
 
-		// should be dividable by quantityIncrement
-		if (marketTrader.symbol == 'ETHUSD') {
-			return quantityIncrement;
-		}
+		// const marketTrader = this.getMarketTrader();          // MarketTrader instance
+		// const quantityIncrement = marketTrader._quantityIncrement;
 
-		return 0;
+		// // should be dividable by quantityIncrement
+		// if (marketTrader.symbol == 'ETHUSD') {
+		// 	return quantityIncrement;
+		// }
+
+		// return 0;
+	}
+
+
+	/**
+	 * Method to overload: On initialization we determine how much money is available for this strategy to trade with
+	 * totalQuoteCurrencyBalance is the total amount available in quote currency (USD when trading on BTCUSD) on your trading account
+	 * return all totalQuoteCurrencyBalance or part of it
+	 * @param  {Number} totalQuoteCurrencyBalance [description]
+	 * @return {Number}                           [description]
+	 */
+	async getMaxOperatingBalance(totalQuoteCurrencyBalance) {
+        const marketTrader = this.getMarketTrader();
+
+        let operatingBalance = this.getTraderSetting('operatingBalance', 0);
+
+        if (!operatingBalance) {
+	        if (marketTrader._quoteCurrency == 'USD' || marketTrader._quoteCurrency == 'USDT') {
+	                return 800;
+	        } else if (marketTrader._quoteCurrency == 'BTC') {
+	                return 0.005;
+	        }
+        } else {
+        	return operatingBalance;
+        }
 	}
 
 	/**
@@ -40,31 +65,15 @@ class Strategy extends Base {
 		const maxBid = await this.getMaxBid(boughtAtPriceValue);
 		const marketTrader = this.getMarketTrader();          // MarketTrader instance
 
-		if (marketTrader.symbol == 'ETHUSD') {
+		// should be dividable by quantityIncrement
+		if (marketTrader.symbol == 'ETHUSD' || marketTrader.symbol == 'ETHUSDT') {
 			return 0.01;
+		}
+		if (marketTrader.symbol == 'ETHBTC') {
+			return (maxBid / 100);
 		}
 
 		return (maxBid / 50);
-	}
-
-	/**
-	 * Method to overload: On initialization we determine how much money is available for this strategy to trade with
-	 * totalQuoteCurrencyBalance is the total amount available in quote currency (USD when trading on BTCUSD) on your trading account
-	 * return all totalQuoteCurrencyBalance or part of it
-	 * @param  {Number} totalQuoteCurrencyBalance [description]
-	 * @return {Number}                           [description]
-	 */
-	async getMaxOperatingBalance(totalQuoteCurrencyBalance) {
-		const marketTrader = this.getMarketTrader();
-
-		if (marketTrader._baseCurrency == 'ETH' || marketTrader._baseCurrency == 'BTC' || marketTrader._baseCurrency == 'LTC') {
-			return 900;
-		}
-		if (marketTrader._quoteCurrency == 'USD') {
-			return 600;
-		} else if (marketTrader._quoteCurrency == 'BTC') {
-			return 0.005;
-		}
 	}
 
 	/**
@@ -75,19 +84,7 @@ class Strategy extends Base {
 	async getExpectedGrowthPercent(boughtAtPriceValue) {
 		const marketTrader = this.getMarketTrader();
 
-		return 5;
-	}
-
-	/**
-	 * Snap target price to a fixed step. return 50; and it will place bids for 1600..1650..1700..1750 etc
-	 * return null; and it will use general percent step
-	 * @param  {[type]} targetPriceValue [description]
-	 * @return {[type]}                  [description]
-	 */
-	async snapTargetPriceTo(targetPriceValue) {
-		const marketTrader = this.getMarketTrader();          // MarketTrader instance
-
-		return null;
+		return 0.4; /// will be increased to get a profit of getMinimumProfitForASale() automatically
 	}
 
 	/**
@@ -98,15 +95,28 @@ class Strategy extends Base {
 	async getMaxBid(targetPriceValue) {
 		const marketTrader = this.getMarketTrader();
 
-		// console.error('marketTrader._quoteCurrency', marketTrader._quoteCurrency);
+        let maxBid = this.getTraderSetting('maxBid', 0);
+        if (!maxBid) {
+	        if (marketTrader._quoteCurrency == 'USD' || marketTrader._quoteCurrency == 'USDT') {
+	                return 5;
+	        } else if (marketTrader._quoteCurrency == 'BTC') {
+	                return 0.0001;
+	        }
+        }
 
-		if (marketTrader._quoteCurrency == 'USD') {
-			return 5;
-		} else if (marketTrader._quoteCurrency == 'BTC') {
-			return 0.0001;
-		}
+        if (maxBid) {
+        	return maxBid;
+        }
 
 		throw new Error('Don not know what to do');
+	}
+
+
+	async snapTargetPriceTo(targetPriceValue) {
+		const marketTrader = this.getMarketTrader();          // MarketTrader instance
+
+        let snapPriceTo = this.getTraderSetting('snapPriceTo', null);
+		return snapPriceTo;
 	}
 
 	/**
@@ -124,31 +134,22 @@ class Strategy extends Base {
 		let possibleBuyBidsCount = Math.floor(availableCurrency / maxBid);
 		let openBuyBidsCount = this.getOpenBuyBidsCount();
 
+		let kToCancel = 0.7;
+		if (possibleBuyBidsCount < 20) {
+			kToCancel = 0.8;
+		}
+
+		let maxPriceForBuyOrders = priceCombined.low * kToCancel;
+
+		// console.log('Cancel if buy price higher then '+maxPriceForBuyOrders);
+
 		for (let bidWorker of bidWorkers) {
-			if (bidWorker.isWaitingForBuyLowerThan(priceCombined.low * 0.7)) {
+			if (bidWorker.isWaitingForBuyLowerThan(maxPriceForBuyOrders)) {
+				// console.log('cancelling');
 				/// close bids if they are waiting to buy with too low price
 				await marketTrader.archiveWaitingForBuyBidWorker(bidWorker);
 			}
 		}
-
-		// let archivedCount = 0;
-		// let keptCount = 0;
-		// if (possibleBuyBidsCount <= 5 && openBuyBidsCount <= 10) {
-		// 	for (let i = bidWorkers.length; i--;) {
-		// 		let bidWorker = bidWorkers[i];
-
-		// 		if (bidWorker.isWaitingForBuy()) {
-		// 			if (keptCount <= 5) {
-		// 				keptCount++;
-		// 			} else {
-		// 				let archived = await marketTrader.archiveWaitingForBuyBidWorker(bidWorker);
-		// 				if (archived) {
-		// 					archivedCount++;
-		// 				}
-		// 			}
-		// 		}
-		// 	}
-		// }
 
 		const intervalPast = await priceCombined.getInterval(this.INTERVALS.MIN15);
 		const shiftsPast = await intervalPast.getShifts(3);
@@ -161,12 +162,16 @@ class Strategy extends Base {
 
 
 		let minPriceDownPercent = 0.99;
+
 		let priceDownPercentStep = 0.0001;
 		let doNotAddIfThereReSamePriceInPercentInterval = 0.09;
 
 
 		if (marketTrader._quoteCurrency == 'BTC') {
 			doNotAddIfThereReSamePriceInPercentInterval = 0.2;
+		}
+		if (marketTrader.symbol == 'CHSBBTC') {
+			doNotAddIfThereReSamePriceInPercentInterval = 0.4;
 		}
 		// let doNotAddIfThereReSamePriceInPercentInterval = 1.2;
 		//
@@ -197,6 +202,9 @@ class Strategy extends Base {
 		}
 
 
+		// console.log(marketTrader.symbol);
+
+
 		for (let priceTarget of priceTargets) {
 			let snapPriceTo = await this.snapTargetPriceTo(priceTarget);
 			if (snapPriceTo) {
@@ -207,19 +215,19 @@ class Strategy extends Base {
 			possibleBuyBidsCount = Math.floor(availableCurrency / maxBid);
 
 			if (possibleBuyBidsCount < 20) {
-				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+				doNotAddIfThereReSamePriceInPercentInterval *= 1.7;
 			}
 			if (possibleBuyBidsCount < 15) {
-				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+				doNotAddIfThereReSamePriceInPercentInterval *= 1.7;
 			}
 			if (possibleBuyBidsCount < 10) {
-				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+				doNotAddIfThereReSamePriceInPercentInterval *= 1.7;
 			}
 			if (possibleBuyBidsCount < 5) {
-				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+				doNotAddIfThereReSamePriceInPercentInterval *= 1.7;
 			}
 			if (possibleBuyBidsCount < 2) {
-				doNotAddIfThereReSamePriceInPercentInterval *= 2;
+				doNotAddIfThereReSamePriceInPercentInterval *= 1.7;
 			}
 
 			if (!marketTrader.isThereBidWorkerInTargetPriceAt(priceTarget, doNotAddIfThereReSamePriceInPercentInterval)) {

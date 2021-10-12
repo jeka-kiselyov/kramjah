@@ -2,22 +2,25 @@ const EventEmitter = require('events');
 const HitBtcAuthedSocket = require('./HitBtcAuthedSocket.js');
 const moment = require('moment');
 
-require('dotenv').config();
 const HitBtcApi = require('./HitBtcApi.js');
+const HitBtcV3toV2 = require('./HitBtcV3toV2.js');
 
-class HitBtc extends EventEmitter {
+class HitBtcTrading extends EventEmitter {
 	constructor(params = {}) {
 		super(params);
 
 		let tradingUrl = 'wss://api.demo.hitbtc.com/api/3/ws/trading';
-		if (process.env.HITBTC_MODE == 'market') {
+		if (params.demo === false) {
 			tradingUrl = 'wss://api.hitbtc.com/api/3/ws/trading';
 		}
 
 		this._tradingSocket = new HitBtcAuthedSocket({
+			demo: params.demo,
 			url: tradingUrl,
 		});
-		this._api = new HitBtcApi();
+		this._api = new HitBtcApi({
+			demo: params.demo,
+		});
 
 		this._initialized = false;
 		this._symbols = {
@@ -38,30 +41,6 @@ class HitBtc extends EventEmitter {
 		this._readyPromise = new Promise((res)=>{
 			this._readyPromiseResolver = res;
 		});
-	}
-
-	static getSingleton() {
-		if (HitBtc.__instance) {
-			return HitBtc.__instance;
-		} else {
-			HitBtc.__instance = new HitBtc();
-			return HitBtc.__instance;
-		}
-	}
-
-	static setLogger(logger) {
-		const instance = this.getSingleton();
-		instance.setLogger(logger);
-	}
-
-	setLogger(logger) {
-		this._logger = logger;
-		if (this._tradingSocket) {
-			this._tradingSocket._logger = logger;
-		}
-		if (this._api) {
-			this._api.setLogger(logger);
-		}
 	}
 
 	async waitTillReady() {
@@ -160,8 +139,6 @@ class HitBtc extends EventEmitter {
 			let itemStrategyName = null;
 
 			if (clientOrderIdItems.length == 3) {
-				clientOrderIdItems[0] = clientOrderIdItems[0].split('-').join('.'); // api v3 doesnt support dots in clientorderid
-
 				originalPrice = parseFloat(clientOrderIdItems[0], 10);
 				itemStrategyName = clientOrderIdItems[1];
 			}
@@ -201,7 +178,7 @@ class HitBtc extends EventEmitter {
 				}
 
 				if (updated) {
-					// this.log('Order updated: '+ clientOrderId, this._orders[clientOrderId].status);
+					this.log('Order updated: '+ clientOrderId);
 					this.emit('updated', this._orders[clientOrderId]);
 				}
 
@@ -231,7 +208,7 @@ class HitBtc extends EventEmitter {
 			}
 			this._orders[clientOrderId] = toPush;
 
-			// this.log('Order added: '+ clientOrderId, this._orders[clientOrderId].status);
+			this.log('Order added: '+ clientOrderId);
 			// console.log('order added', clientOrderId, this._orders[clientOrderId]);
 			this.emit('added', this._orders[clientOrderId]);
 		} catch(e) {
@@ -311,10 +288,6 @@ class HitBtc extends EventEmitter {
 		}
 	}
 
-	async readyAndNormalizeSymbol(symbol) {
-		return await this._api.readyAndNormalizeSymbol(symbol);
-	}
-
 	async getRecentOrdersBySymbolAndStrategyName(params) {
 		await this.initialize();
 		await this.waitTillReady();
@@ -335,7 +308,7 @@ class HitBtc extends EventEmitter {
 		if (this._symbols[symbol][strategyName]) {
 			for (let originalPriceKey in this._symbols[symbol][strategyName]) {
 
-			    this._symbols[symbol][strategyName][originalPriceKey].sort(function(a, b) { return b.updatedAtDate - a.updatedAtDate; }); /// sort DESC by createdAt
+			    this._symbols[symbol][strategyName][originalPriceKey].sort(function(a, b) { return b.createdAt - a.createdAt; }); /// sort DESC by createdAt
 
 				const ordersCount = this._symbols[symbol][strategyName][originalPriceKey].length;
 				const mostRecentOrder = this._symbols[symbol][strategyName][originalPriceKey][0];
@@ -366,14 +339,6 @@ class HitBtc extends EventEmitter {
 	    importantOrders.sort(function(a, b) { return b.originalPrice - a.originalPrice; }); /// sort DESC by originalPrice
 
 		return importantOrders;
-	}
-
-	async getAllSymbols() {
-		return await this._api.getAllSymbols();
-	}
-
-	async getSymbolInfo(symbol) {
-		return await this._api.getSymbolInfo(symbol);
 	}
 
     async getLastD1Candle(symbol) {
@@ -409,43 +374,22 @@ class HitBtc extends EventEmitter {
 	}
 
 	normalizeBalance(balanceApiResponse) {
-		const ret = [];
-		let hasUSD = false;
-		let usdtItem = null;
+		const ret = {};
 		for (let balanceItem of balanceApiResponse) {
 			const key = balanceItem.currency;
-			const item = {
+			ret[key] = {
 				available: parseFloat(balanceItem.available),
 				reserved: parseFloat(balanceItem.reserved),
 				currency: balanceItem.currency,
 			};
-			item.total = item.available + item.reserved;
 
-			ret.push(item);
-			if (item.currency == 'USD') {
-				hasUSD = true;
-			} else if (item.currency == 'USDT') {
-				usdtItem = item;
-			}
+			ret[key].total = ret[key].available + ret[key].reserved;
 		}
 
-		// copy USDT as USD
-		if (!hasUSD && usdtItem) {
-			ret.push({
-				available: usdtItem.available,
-				reserved: usdtItem.reserved,
-				total: usdtItem.total,
-				currency: 'USD',
-			});
+		// copy USDT as USD?
+		if (ret['USDT'] && !ret['USD']) {
+			ret['USD'] = ret['USDT'];
 		}
-
-		for (let item of ret) {
-			ret[item.currency] = item;
-		}
-
-		// if (ret['USDT'] && !ret['USD']) {
-		// 	ret['USD'] = ret['USDT'];
-		// }
 
 		return ret;
 	}
@@ -453,8 +397,6 @@ class HitBtc extends EventEmitter {
 	async placeOrder(params) {
 		await this.initialize();
 		await this.waitTillReady();
-
-		console.log(params);
 
 		// https://api.hitbtc.com/#create-new-spot-order
 		let clientOrderId = params.clientOrderId || null;
@@ -487,20 +429,14 @@ class HitBtc extends EventEmitter {
 			strict_validate: strictValidate,
 		};
 
-
 		if (clientOrderId) {
 			orderData.client_order_id = clientOrderId;
 		}
-
-		console.log(orderData);
-		console.log(this._tradingSocket._socketAuthed);
 
 		let resp = await this._tradingSocket.sendRequest({
 			"method": "spot_new_order",
 			"params": orderData,
 		});
-
-		console.log(resp);
 
 		if (resp) {
 			if (resp.client_order_id) {
@@ -525,8 +461,6 @@ class HitBtc extends EventEmitter {
 	}
 
 	async placeSellOrder(params) {
-		console.log(params);
-
 		try {
 			params.side = 'sell';
 			return await this.placeOrder(params);
@@ -572,4 +506,4 @@ class HitBtc extends EventEmitter {
 	}
 };
 
-module.exports = HitBtc;
+module.exports = HitBtcTrading;

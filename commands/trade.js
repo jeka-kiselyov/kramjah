@@ -2,9 +2,8 @@ const { Program, Command } = require('lovacli');
 
 const path = require('path');
 const HistoricalMarket = require('../classes/HistoricalMarket.js');
-const RealMarketData = require('../classes/RealMarketData.js');
 const ConsoleUI = require('../classes/ConsoleUI.js');
-const TradingApi = require('../classes/TradingApi.js');
+const Market = require('../classes/Market.js');
 
 const Notificator = require('../classes/Notificator.js');
 const MarketTrader = require('../classes/MarketTrader.js');
@@ -33,7 +32,9 @@ class Handler extends Command {
         }
 
         const config = this.program.config;
-        const realMarketData = new RealMarketData();
+
+        let market = Market.getSingleton();
+        market.setLogger(logger);
 
         if (!config.traders) {
             throw new Error('No traders defined in settings');
@@ -80,6 +81,7 @@ class Handler extends Command {
                 mode: 'market',
                 strategyName: strategyName,
                 logger: logger,
+                traderSetting: traderSetting,
             });
 
             try {
@@ -149,7 +151,7 @@ class Handler extends Command {
                 const symbol = marketTrader._symbol;
 
                 let forTheRace = new Promise((res)=>{
-                    realMarketData.getTicker(symbol)
+                    market.getTicker(symbol)
                         .then(async(ticker)=>{
                             let price = null;
                             let time = null;
@@ -180,6 +182,11 @@ class Handler extends Command {
                                     logger.info(e);
                                     throw e;
                                 }
+
+                                // console.log('traderSetting', await marketTrader.traderSetting );
+                                // console.log('getMaxOperatingBalance', await marketTrader._strategy.getMaxOperatingBalance() );
+                                // console.log('getUsedCurrency', await marketTrader.getUsedCurrency());
+                                // console.log('getAvailableCurrency', await marketTrader.getAvailableCurrency());
                             }
 
                             res();
@@ -192,48 +199,7 @@ class Handler extends Command {
                     await Promise.race([forTheRace, new Promise((res)=>{ setTimeout(res, 20000); })]);
                 } catch(e) {}
 
-                // try {
-                //     const marketTrader = marketTraders[marketTraderKey];
-                //     const historicalMarket = marketTrader.historicalMarket;
-                //     const symbol = marketTrader._symbol;
-
-                //     const ticker = await realMarketData.getTicker(symbol);
-
-                //     let price = null;
-                //     let time = null;
-
-                //     if (ticker) {
-                //         await historicalMarket.pushLowestCombinedIntervalRAWAndRecalculateParents(ticker);
-                //         time = ticker.time;
-
-                //         price = await historicalMarket.getPriceAt(time);
-                //         price = await price.getInterval(HistoricalMarket.INTERVALS.MIN5); // price is pricecombined now
-
-                //         if (price) {
-                //             try {
-                //                 await marketTrader.processNewCombinedPrice(price);
-                //             } catch(e) {
-                //                 console.error(e);
-                //             }
-                //         }
-
-                //         // if (args.ui) await ConsoleUI.setDataFromMarketTrader(marketTrader);
-
-                //         try {
-                //             // if (args.ui) await ConsoleUI.drawTimePrice(price);
-                //             // if (args.ui) await ConsoleUI.drawMarketTrader(marketTrader);
-                //             // if (args.ui) ConsoleUI.swawBuffers();
-                //             if (!args.ui) logger.info(''+marketTraderKey+' - current price: '+price.price);
-                //         } catch(e) {
-                //             logger.info(e);
-                //             throw e;
-                //         }
-                //     }
-                // } catch(e) {
-                //     console.error(e);
-                // }
-
-                await new Promise((res)=>{ setTimeout(res, 2000); });
+                await new Promise((res)=>{ setTimeout(res, 500); });
             }
         } while(true);
 

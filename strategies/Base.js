@@ -24,6 +24,13 @@ class Base {
 		}
 	}
 
+	getTraderSetting(name, defaultValue) {
+		if (this._marketTrader && this._marketTrader.traderSetting && this._marketTrader.traderSetting[name] !== undefined) {
+			return this._marketTrader.traderSetting[name];
+		}
+		return defaultValue;
+	}
+
 	/**
 	 * Method to overload: On initialization we determine how much money is available for this strategy to trade with
 	 * totalQuoteCurrencyBalance is the total amount available in quote currency (USD when trading on BTCUSD) on your trading account
@@ -75,7 +82,6 @@ class Base {
 
 		return null;
 	}
-
 
 
 	/**
